@@ -9,6 +9,13 @@ export const supabase = isConfigured
 export const DEMO_IMAGE_URL = `${import.meta.env.BASE_URL}modelo-seridoplast.jpg`
 
 export function cleanError(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const detail = error as { code?: unknown; message?: unknown; details?: unknown }
+    if (detail.code === 'PGRST204') {
+      return 'O Supabase não reconheceu uma coluna dos cartazes. Execute a migração 003 no SQL Editor e recarregue a página.'
+    }
+    if (typeof detail.message === 'string' && detail.message.trim()) return detail.message
+  }
   if (error instanceof Error) return error.message
   if (typeof error === 'string') return error
   return 'Não foi possível concluir esta operação.'

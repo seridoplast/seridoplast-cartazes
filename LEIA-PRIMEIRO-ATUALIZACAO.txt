@@ -1,34 +1,27 @@
-SERIDÓPLAST CARTAZES — ATUALIZAÇÃO 1.1
-====================================
+SERIDÓPLAST CARTAZES — CORREÇÃO v1.2
+=====================================
 
-Esta versão atualiza o projeto 1.0 existente. Não crie outro Supabase!
+1) CORRIJA O BANCO PRIMEIRO (resolve o PGRST204 ao salvar lotes de .xlsx):
+   Supabase > SQL Editor > New query > cole o conteúdo de:
+   supabase/migrations/003_corrigir_posters_font_id.sql
+   Clique Run. A consulta final deve listar a coluna font_id.
+   A operação é idempotente e não apaga nenhum registro.
 
-1. ANTES DE ATUALIZAR O SITE:
-   Supabase > SQL Editor > New query
-   Copie e execute:
-   supabase/migrations/002_fonte_por_cartaz.sql
-   A migração mantém os cartazes, modelos, fontes e usuários existentes.
+2) ENVIE ESTA VERSÃO AO GITHUB:
+   Envie O CONTEÚDO da pasta seridoplast-cartazes para a RAIZ do repositório
+   seridoplast/seridoplast-cartazes, substituindo os arquivos correspondentes.
+   Preserve .github/workflows/deploy.yml e os dois Secrets existentes.
+   Commit na branch main.
+   Confira o resultado em Actions. Depois Ctrl+F5 no navegador.
 
-2. DEPOIS:
-   Extraia este ZIP.
-   Envie os arquivos de dentro de "seridoplast-cartazes" ao repositório GitHub existente,
-   substituindo o conteúdo correspondente. Preserve os Secrets do GitHub já cadastrados.
-   Não remova nem altere a pasta .github/workflows.
-   Faça commit na branch main.
+3) ALTERAÇÕES:
+   - Logo horizontal SEM ícone no menu lateral, login e carregamento.
+   - Ícone oficial mantido no favicon SVG/PNG.
+   - Mensagem mais útil quando o banco rejeita uma coluna inexistente.
+   - Lote Excel .xlsx, fontes por cartaz e PDFs continuam como na v1.1.
 
-3. ACOMPANHE:
-   GitHub > Actions > Publicar no GitHub Pages (precisa ficar verde).
-   Abra o site e atualize com Ctrl+F5.
-
-MUDANÇAS:
-- Nova marca em modo claro e escuro + favicon SVG/PNG.
-- Importação de planilhas Excel (.xlsx) em lote; primeira aba, colunas A-D.
-- Planilha de exemplo em public/exemplo-cartazes.xlsx.
-- Mensagens flutuantes somem após 2 segundos.
-- Fonte por cartaz, herdando a do modelo por padrão.
-- Escolha da fonte para um lote inteiro.
-
-LIMITAÇÃO DO TESTE:
-- A sintaxe das fontes TypeScript/TSX foi verificada.
-- A instalação npm e build completo não puderam ser testados neste ambiente.
-- Confirme a compilação pelo GitHub Actions após enviar.
+IMPORTANTE:
+   O erro PGRST204 é do esquema do banco (a tabela não reconheceu a
+   coluna usada no INSERT), não do arquivo Excel. Se persistir, em DevTools
+   > Network > requisição com erro > Response, veja a mensagem retornada.
+   NUNCA compartilhe o cabeçalho 'Authorization: Bearer ...'.

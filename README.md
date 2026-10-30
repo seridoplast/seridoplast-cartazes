@@ -168,3 +168,8 @@ Projeto inicial para uso interno da Seridóplast. O material de marca incluído 
 ### Verificação técnica
 
 Nesta entrega foi possível verificar a sintaxe do código atualizado, examinar os recursos gráficos e gerar uma planilha Excel válida. **A compilação Vite completa não pôde ser executada neste ambiente** porque o download das dependências npm ficou indisponível. O workflow GitHub Actions é a validação definitiva da compilação e publicação; se aparecer erro, envie o log da etapa de build.
+
+
+## Correção v1.2 (PGRST204)
+
+Para bancos criados antes da fonte por cartaz, execute `supabase/migrations/003_corrigir_posters_font_id.sql` no SQL Editor do projeto. A migração adiciona `public.posters.font_id` caso falte e recarrega o cache de esquema do PostgREST. Depois publique novamente e force a atualização do navegador. A marca horizontal não exibe mais o símbolo; ele permanece no favicon.

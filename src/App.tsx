@@ -33,6 +33,13 @@ function stripPoster(input: PosterInput): PosterInput {
     price_to: input.price_to, unit_label: input.unit_label.trim(), font_id: input.font_id ?? null }
 }
 const numeric = (value: unknown) => value == null ? null : Number(value)
+function isMissingFontColumn(error: { code?: string; message?: string } | null): boolean {
+  return error?.code === 'PGRST204' && /font_id/i.test(error.message || '')
+}
+function withoutFontId<T extends { font_id?: string | null }>(row: T): Omit<T, 'font_id'> {
+  const { font_id: _ignored, ...rest } = row
+  return rest
+}
 function normalizedPoster(row: Poster): Poster { return { ...row, price_from: numeric(row.price_from), price_to: Number(row.price_to), font_id: row.font_id ?? null } }
 function normalizeTemplate(row: PosterTemplate): PosterTemplate {
   return { ...row, zone: { ...INITIAL_ZONE, ...row.zone }, style: { ...INITIAL_STYLE, ...row.style } }
@@ -202,9 +209,15 @@ function Workspace({ user, onLogout }: Props) {
     const item = stripPoster(posterForm)
     await run(async () => {
       if (supabase) {
-        const result = newPoster
+        let result = newPoster
           ? await supabase.from('posters').insert({ ...item, owner_id: user.id }).select().single()
           : await supabase.from('posters').update({ ...item, updated_by: user.id }).eq('id', selectedId!).select().single()
+        if (isMissingFontColumn(result.error)) {
+          // Compatibilidade com API cujo cache ainda não reconhece posters.font_id.
+          result = newPoster
+            ? await supabase.from('posters').insert({ ...withoutFontId(item), owner_id: user.id }).select().single()
+            : await supabase.from('posters').update({ ...withoutFontId(item), updated_by: user.id }).eq('id', selectedId!).select().single()
+        }
         if (result.error) throw result.error
         const saved = normalizedPoster(result.data as Poster)
         setSelectedId(saved.id); setNewPoster(false); await refresh()
@@ -238,7 +251,12 @@ function Workspace({ user, onLogout }: Props) {
     if (!templates.some(t => t.id === batchTemplateId)) throw new Error('Selecione um modelo para o lote.')
     await run(async () => {
       if (supabase) {
-        const { error } = await supabase.from('posters').insert(rows.map(row => ({ ...row, owner_id: user.id })))
+        const payload = rows.map(row => ({ ...row, owner_id: user.id }))
+        let { error } = await supabase.from('posters').insert(payload)
+        if (isMissingFontColumn(error)) {
+          const retry = await supabase.from('posters').insert(payload.map(withoutFontId))
+          error = retry.error
+        }
         if (error) throw error
         await refresh()
       } else {

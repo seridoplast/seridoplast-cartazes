@@ -10,3 +10,22 @@
 .recovery-page{min-height:100vh;display:grid;place-items:center;background:var(--bg);padding:24px}.recovery-card{width:min(100%,440px);background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);border-radius:19px;padding:39px}.recovery-card h1{font-size:25px;margin-bottom:10px}.recovery-card p{font-size:13px;color:var(--muted);margin-bottom:25px}.recovery-card form{gap:19px}
 
 .batch-file-actions{display:flex;gap:25px;flex-wrap:wrap;align-items:center}
+
+/* v1.1 Identidade oficial; o símbolo SVG enviado permanece inalterado */
+.brand-logo{display:inline-flex;align-items:center;line-height:1;max-width:100%;flex:none}
+.brand-logo img{height:auto;width:100%;display:block;object-fit:contain}
+.brand-logo--dark{display:none!important}
+:root[data-theme='dark'] .brand-logo--light{display:none!important}
+:root[data-theme='dark'] .brand-logo--dark{display:block!important}
+.brand-logo.on-red .brand-logo--light{display:none!important}
+.brand-logo.on-red .brand-logo--dark{display:block!important}
+.auth-brand .brand-logo{width:min(430px,70vw)}
+.sidebar-head{gap:6px;padding:2px 7px 35px;min-width:0}
+.sidebar-logo{width:195px;min-width:0}
+.sidebar-head .mobile-close{margin-left:auto}
+.loading-logo{width:300px;max-width:75vw}
+.batch-font-select{margin-top:18px}
+.batch-success{margin:0 0 12px;display:flex;align-items:center;gap:8px;background:#e7f8ee;color:#13683a;border:1px solid #b7eacc;border-radius:8px;padding:10px 12px;font-size:12px;font-weight:800}
+:root[data-theme='dark'] .batch-success{background:#18362b;border-color:#2e634c;color:#91e8b3}
+@media(max-width:790px){.auth-brand .brand-logo{width:min(335px,76vw)}}
+@media(max-width:575px){.sidebar-logo{width:195px}.auth-brand .brand-logo{width:min(315px,78vw)}}

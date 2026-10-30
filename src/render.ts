@@ -174,7 +174,7 @@ export async function exportPostersPDF(options: {
     if (!template) throw new Error(`Modelo do cartaz “${poster.product_name}” não encontrado.`)
     const url = urls[template.id]
     if (!url) throw new Error(`Não foi possível carregar a arte do modelo “${template.name}”.`)
-    const font = fonts.find(f => f.id === template.style.fontId)
+    const font = fonts.find(f => f.id === (poster.font_id || template.style.fontId))
     await paintPoster(canvas, template, poster, url, font?.family ?? 'Arial', 1654)
     const data = canvas.toDataURL('image/jpeg', .94)
     if (isDouble) doc.addImage(data, 'JPEG', index % 2 === 0 ? 0 : 148.5, 0, 148.5, 210, undefined, 'FAST')

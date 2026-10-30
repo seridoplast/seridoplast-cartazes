@@ -40,6 +40,10 @@ create table if not exists public.font_assets (
   created_at timestamptz not null default now()
 );
 
+-- Fonte opcional por cartaz: NULL utiliza a fonte do modelo.
+alter table public.posters add column if not exists font_id uuid references public.font_assets(id) on delete set null;
+create index if not exists idx_posters_font_id on public.posters (font_id);
+
 -- Não permita que colaboradores transfiram a propriedade de itens de outros usuários.
 create or replace function public.stamp_shared_update()
 returns trigger language plpgsql set search_path = '' as $$

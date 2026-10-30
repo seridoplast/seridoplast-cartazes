@@ -12,6 +12,8 @@ import { DEMO_IMAGE_URL, cleanError, isConfigured, randomFilePath, signedUrl, su
 import { exportPostersPDF, loadCustomFont, loadImage, money, parseMoney } from './render'
 import { PosterCanvas } from './components/PosterCanvas'
 import { ZoneEditor } from './components/ZoneEditor'
+import { BrandLogo } from './components/BrandLogo'
+import { importExcel } from './excel'
 import {
   EXAMPLE_POSTER, EXAMPLE_TEMPLATE, INITIAL_STYLE, INITIAL_ZONE,
   type FontAsset, type Poster, type PosterInput, type PosterStyle,
@@ -24,18 +26,18 @@ const NOW = () => new Date().toISOString()
 const id = () => crypto.randomUUID()
 const DEMO_USER = { id: 'demo', email: 'demonstração@seridoplast.com.br' }
 function makePoster(templateId: string): PosterInput {
-  return { template_id: templateId, product_name: '', price_from: null, price_to: 0, unit_label: '' }
+  return { template_id: templateId, product_name: '', price_from: null, price_to: 0, unit_label: '', font_id: null }
 }
 function stripPoster(input: PosterInput): PosterInput {
   return { template_id: input.template_id, product_name: input.product_name.trim(), price_from: input.price_from,
-    price_to: input.price_to, unit_label: input.unit_label.trim() }
+    price_to: input.price_to, unit_label: input.unit_label.trim(), font_id: input.font_id ?? null }
 }
 const numeric = (value: unknown) => value == null ? null : Number(value)
-function normalizedPoster(row: Poster): Poster { return { ...row, price_from: numeric(row.price_from), price_to: Number(row.price_to) } }
+function normalizedPoster(row: Poster): Poster { return { ...row, price_from: numeric(row.price_from), price_to: Number(row.price_to), font_id: row.font_id ?? null } }
 function normalizeTemplate(row: PosterTemplate): PosterTemplate {
   return { ...row, zone: { ...INITIAL_ZONE, ...row.zone }, style: { ...INITIAL_STYLE, ...row.style } }
 }
-function parseBulk(text: string, templateId: string): PosterInput[] {
+function parseBulk(text: string, templateId: string, fontId: string | null): PosterInput[] {
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
   const result: PosterInput[] = []
   for (const line of lines) {
@@ -46,7 +48,7 @@ function parseBulk(text: string, templateId: string): PosterInput[] {
     if (!name || value === null) throw new Error(`Linha inválida: “${line.slice(0, 90)}”. Use Produto | De | Por | Unidade.`)
     const old = parseMoney(oldValue)
     if (oldValue && old === null) throw new Error(`Preço antigo inválido em “${name}”.`)
-    result.push({ product_name: name, price_from: old, price_to: value, unit_label: unit, template_id: templateId })
+    result.push({ product_name: name, price_from: old, price_to: value, unit_label: unit, template_id: templateId, font_id: fontId })
   }
   if (!result.length) throw new Error('Cole pelo menos um produto com preço de venda.')
   if (result.length > 200) throw new Error('Importe no máximo 200 produtos por vez.')
@@ -89,7 +91,7 @@ function Login({ onLogin }: { onLogin: (user: {id:string;email:string}) => void 
     } catch (err) { setMessage(cleanError(err)) } finally { setBusy(false) }
   }
   return <main className="auth-page">
-    <div className="auth-brand"><div className="brand-emblem">S<span>↗</span></div><div><strong>Seridó<span>plast</span></strong><small>Acreditamos na força do trabalho!</small></div></div>
+    <div className="auth-brand"><BrandLogo className="on-red" /></div>
     <div className="auth-hero"><div className="auth-decoration"><span>25</span> anos de quem faz acontecer</div><h1>Cartazes de preço,<br/><em>sem complicação.</em></h1><p>Crie campanhas, padronize as etiquetas de gôndola e imprima dezenas de ofertas com poucos cliques.</p>
       <div className="auth-points"><span><CheckCircle2 size={18}/> Modelos compartilhados</span><span><CheckCircle2 size={18}/> Impressão A4 precisa</span><span><CheckCircle2 size={18}/> Equipe conectada</span></div>
     </div>
@@ -127,11 +129,19 @@ function Workspace({ user, onLogout }: Props) {
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchText, setBatchText] = useState('')
   const batchFileRef = useRef<HTMLInputElement>(null)
+  const [batchRows, setBatchRows] = useState<PosterInput[] | null>(null)
+  const [batchFilename, setBatchFilename] = useState('')
+  const [batchFontId, setBatchFontId] = useState<string>('')
   const [batchTemplateId, setBatchTemplateId] = useState('')
   const [modelEditing, setModelEditing] = useState<PosterTemplate | null>(null)
   const [exportProgress, setExportProgress] = useState('')
 
   const notify = (text: string, error = false) => setToast({ text, error })
+  useEffect(() => {
+    if (!toast) return
+    const timer = window.setTimeout(() => setToast(null), 2000)
+    return () => window.clearTimeout(timer)
+  }, [toast])
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; localStorage.setItem('cartazes-theme', dark ? 'dark' : 'light') }, [dark])
   const refresh = useCallback(async () => {
     if (!supabase) return
@@ -223,7 +233,8 @@ function Workspace({ user, onLogout }: Props) {
     }, 'Cartaz excluído.')
   }
   async function saveBulk() {
-    const rows = parseBulk(batchText, batchTemplateId)
+    const rows = (batchRows || parseBulk(batchText, batchTemplateId, batchFontId || null))
+      .map(row => ({ ...row, template_id: batchTemplateId, font_id: batchFontId || null }))
     if (!templates.some(t => t.id === batchTemplateId)) throw new Error('Selecione um modelo para o lote.')
     await run(async () => {
       if (supabase) {
@@ -233,12 +244,12 @@ function Workspace({ user, onLogout }: Props) {
       } else {
         setPosters(prev => [...rows.map(row => ({ ...row, id: id(), owner_id: user.id, created_at: NOW(), updated_at: NOW() })), ...prev])
       }
-      setBatchOpen(false); setBatchText('')
+      setBatchOpen(false); setBatchText(''); setBatchRows(null); setBatchFilename('')
     }, `${rows.length} cartazes adicionados à biblioteca.`)
   }
   function openBatch() {
     if (!templates.length) { notify('Crie um modelo antes de importar produtos.', true); setPage('templates'); return }
-    setBatchTemplateId(activeTemplate?.id || templates[0].id); setBatchOpen(true)
+    setBatchTemplateId(activeTemplate?.id || templates[0].id); setBatchOpen(true); setBatchFontId(''); setBatchRows(null); setBatchFilename(''); setBatchText('')
   }
   async function saveTemplate(input: TemplateInput, file: File | null, existing: PosterTemplate | null) {
     await run(async () => {
@@ -305,7 +316,7 @@ function Workspace({ user, onLogout }: Props) {
   }
   async function deleteFont(font: FontAsset) {
     if (font.owner_id !== user.id) { notify('Só quem enviou a fonte pode excluí-la.', true); return }
-    if (templates.some(t => t.style.fontId === font.id)) { notify('A fonte está sendo utilizada por um modelo. Troque-a antes de excluir.', true); return }
+    if (templates.some(t => t.style.fontId === font.id) || posters.some(p => p.font_id === font.id)) { notify('Esta fonte está sendo utilizada por um modelo ou cartaz. Troque-a antes de excluir.', true); return }
     if (!window.confirm(`Excluir a fonte “${font.name}”?`)) return
     await run(async () => {
       if (supabase) {
@@ -347,7 +358,7 @@ function Workspace({ user, onLogout }: Props) {
   ]
   return <div className="app-shell">
     <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
-      <div className="sidebar-head"><div className="brand-emblem small">S<span>↗</span></div><div className="brand-copy"><strong>Seridó<span>plast</span></strong><small>Cartazes de preço</small></div><button className="icon-button mobile-close" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X size={19}/></button></div>
+      <div className="sidebar-head"><BrandLogo className="sidebar-logo" /><button className="icon-button mobile-close" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X size={19}/></button></div>
       <div className="side-caption">ESPAÇO DE TRABALHO</div>
       <nav className="nav-menu">{menu.map(item => <button key={item.id} className={`nav-link ${page === item.id || (page === 'edit-template' && item.id === 'templates') ? 'active' : ''}`}
         onClick={() => { setPage(item.id); setMobileNav(false) }}><item.icon size={20}/><span>{item.label}</span>{item.count !== undefined && <em>{item.count}</em>}</button>)}</nav>
@@ -374,7 +385,7 @@ function Workspace({ user, onLogout }: Props) {
           <div className="stat-card"><div className="stat-icon yellow"><Type size={20}/></div><span>Fontes instaladas</span><strong>{fonts.length}</strong><small>Uso em todos os modelos</small></div></div>
         <div className="section-title"><div><h2>Comece por aqui</h2><p>Acesse rapidamente as ferramentas principais.</p></div></div>
         <div className="quick-grid"><button className="quick-card" onClick={() => startPoster()}><span className="quick-icon"><FilePlus2 size={22}/></span><strong>Novo cartaz</strong><p>Insira produto, preços e unidade de venda.</p><span>Começar <ArrowRight size={16}/></span></button>
-          <button className="quick-card" onClick={openBatch}><span className="quick-icon"><CopyPlus size={22}/></span><strong>Cadastro em lote</strong><p>Cole dezenas de itens direto do Excel.</p><span>Importar <ArrowRight size={16}/></span></button>
+          <button className="quick-card" onClick={openBatch}><span className="quick-icon"><CopyPlus size={22}/></span><strong>Cadastro em lote</strong><p>Abra um arquivo Excel .xlsx ou cole várias linhas.</p><span>Importar <ArrowRight size={16}/></span></button>
           <button className="quick-card" onClick={() => editModel(null)}><span className="quick-icon"><ImagePlus size={22}/></span><strong>Criar um modelo</strong><p>Envie sua arte e marque a área dos preços.</p><span>Criar modelo <ArrowRight size={16}/></span></button></div>
         <div className="how-to"><div className="how-icon"><WandSparkles size={22}/></div><div><strong>Fluxo recomendado</strong><p>1. Publique um modelo → 2. Cadastre produtos individualmente ou em lote → 3. Selecione os cartazes → 4. Exporte o PDF em A4 ou em duas unidades por folha.</p></div></div>
       </>}
@@ -391,11 +402,15 @@ function Workspace({ user, onLogout }: Props) {
             <ChevronRight size={17} className="poster-row-arrow"/></div>) : <div className="empty-list"><FolderOpen size={28}/><strong>Nenhum cartaz encontrado</strong><p>Crie um novo cartaz ou altere sua busca.</p></div>}</div>
           <div className="panel-bottom"><button className="link-action" onClick={openBatch}><CopyPlus size={17}/> Adicionar vários produtos</button></div></section>
           <section className="preview-panel panel"><div className="panel-title"><div><h3>Pré-visualização</h3><span>Visualize antes de imprimir</span></div><span className="preview-tag">A4 · 210×297 mm</span></div>
-            {activeTemplate && imageUrls[activeTemplate.id] ? <div className="preview-wrap"><PosterCanvas template={activeTemplate} poster={posterPreview} imageURL={imageUrls[activeTemplate.id]} fontFamily={fonts.find(f => f.id === activeTemplate.style.fontId)?.family}/></div> : <div className="empty-preview"><ImagePlus size={34}/><strong>Sem modelo disponível</strong><p>Crie ou publique o modelo de exemplo para começar.</p><button className="btn btn-outline" onClick={() => editModel(null)}>Adicionar modelo</button></div>}
+            {activeTemplate && imageUrls[activeTemplate.id] ? <div className="preview-wrap"><PosterCanvas template={activeTemplate} poster={posterPreview} imageURL={imageUrls[activeTemplate.id]} fontFamily={fonts.find(f => f.id === (posterForm.font_id || activeTemplate.style.fontId))?.family}/></div> : <div className="empty-preview"><ImagePlus size={34}/><strong>Sem modelo disponível</strong><p>Crie ou publique o modelo de exemplo para começar.</p><button className="btn btn-outline" onClick={() => editModel(null)}>Adicionar modelo</button></div>}
             <div className="preview-footer"><span><CheckCircle2 size={16}/> Proporção de impressão A4</span><button className="btn btn-outline btn-small" disabled={working || !activeTemplate} onClick={() => void doExport([posterPreview])}><Download size={16}/> Baixar este</button></div></section>
           <section className="form-panel panel"><div className="panel-title"><div><h3>{newPoster ? 'Novo cartaz' : 'Editar cartaz'}</h3><span>Informações da oferta</span></div><Settings2 size={19} className="muted-icon"/></div>
             {newPoster || activePoster ? <div className="editor-form">
               <label>Modelo visual<select value={posterForm.template_id} onChange={e => setPosterForm(p => ({ ...p, template_id: e.target.value }))}>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+              <label>Fonte deste cartaz<select value={posterForm.font_id || ''} onChange={e => setPosterForm(p => ({ ...p, font_id: e.target.value || null }))}>
+                <option value="">Usar a fonte definida no modelo</option>
+                {fonts.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select><small>Altera apenas este cartaz, sem modificar o modelo ou os outros cartazes.</small></label>
               <label>Nome do produto <span className="required">*</span><textarea rows={3} maxLength={350} placeholder="Ex.: CRISTALCOPO COPO PS 150ML 100UN" value={posterForm.product_name} onChange={e => setPosterForm(p => ({ ...p, product_name: e.target.value }))}/><small>Centralizado automaticamente no cartaz</small></label>
               <div className="divider-label"><span>Valores da oferta</span></div><div className="price-fields"><label>De (opcional)<span className="input-prefix">R$</span><CurrencyInput key={`from-${selectedId}-${newPoster}`} value={posterForm.price_from} onChange={value => setPosterForm(p => ({ ...p, price_from: value }))} placeholder="99,90"/></label>
                 <label>Por <span className="required">*</span><span className="input-prefix">R$</span><CurrencyInput key={`to-${selectedId}-${newPoster}`} value={posterForm.price_to} onChange={value => setPosterForm(p => ({ ...p, price_to: value ?? 0 }))} placeholder="78,75"/></label></div>
@@ -412,26 +427,45 @@ function Workspace({ user, onLogout }: Props) {
         {templates.length ? <div className="template-grid">{templates.map(t => <article className="template-card" key={t.id}><div className="template-image"><img src={imageUrls[t.id]} alt={`Modelo ${t.name}`}/><span className="shared-label"><Cloud size={13}/> Compartilhado</span></div><div className="template-info"><strong>{t.name}</strong><small>{t.image_width} × {t.image_height} px • {posters.filter(p => p.template_id === t.id).length} cartazes</small><div className="template-actions"><button className="btn btn-outline btn-small" onClick={() => editModel(t)}><Settings2 size={15}/> Editar</button><button className="btn btn-subtle btn-small" onClick={() => startPoster(t.id)}><Plus size={15}/> Usar</button><button className="icon-button" onClick={() => void downloadBlankTemplate(t)} title="Baixar modelo em branco em PDF"><Download size={17}/></button>{t.owner_id === user.id && <button className="icon-button danger" title="Excluir modelo" onClick={() => void deleteTemplate(t)}><Trash2 size={16}/></button>}</div></div></article>)}</div> : <div className="empty-page"><ImagePlus size={34}/><h3>Publique seu primeiro modelo</h3><p>O arquivo de exemplo da Seridóplast já está incluído no projeto. Abra o editor e clique em Salvar modelo para compartilhá-lo.</p><button className="btn btn-primary" onClick={() => editModel(null)}><Plus size={17}/> Publicar modelo de exemplo</button></div>}
       </>}
       {page === 'fonts' && <FontsPage fonts={fonts} working={working} userId={user.id} onUpload={saveFont} onDelete={deleteFont} />}
-      {page === 'edit-template' && <TemplateEditor template={modelEditing} imageUrl={modelEditing ? imageUrls[modelEditing.id] : DEMO_IMAGE_URL} fonts={fonts} working={working} onClose={() => setPage('templates')} onSave={saveTemplate}/>}
+      {page === 'edit-template' && <TemplateEditor template={modelEditing} imageUrl={modelEditing ? imageUrls[modelEditing.id] : DEMO_IMAGE_URL} fonts={fonts} working={working} onClose={() => setPage('templates')} onSave={saveTemplate} onNotify={notify}/>}
       </main>
       <footer className="app-footer"><span>Seridóplast <b>•</b> Cartazes de preço</span><span>Acreditamos na força do trabalho!</span></footer>
     </div>
     {toast && <div role="status" className={`toast ${toast.error ? 'error' : ''}`}>{toast.error ? <CircleHelp size={19}/> : <CheckCircle2 size={19}/>}<span>{toast.text}</span><button onClick={() => setToast(null)} aria-label="Fechar aviso"><X size={17}/></button></div>}
-    {batchOpen && <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setBatchOpen(false) }}><section className="modal batch-modal" role="dialog" aria-modal="true" aria-label="Cadastro em lote"><header><div><div className="eyebrow muted">IMPORTAÇÃO RÁPIDA</div><h2>Vários cartazes de uma vez</h2><p>Copie as quatro colunas do Excel e cole abaixo.</p></div><button className="icon-button" onClick={() => setBatchOpen(false)} aria-label="Fechar"><X size={20}/></button></header>
+    {batchOpen && <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setBatchOpen(false) }}><section className="modal batch-modal" role="dialog" aria-modal="true" aria-label="Cadastro em lote"><header><div><div className="eyebrow muted">IMPORTAÇÃO RÁPIDA</div><h2>Vários cartazes de uma vez</h2><p>Envie um Excel .xlsx ou cole as quatro colunas abaixo.</p></div><button className="icon-button" onClick={() => setBatchOpen(false)} aria-label="Fechar"><X size={20}/></button></header>
         <div className="modal-content"><label>Modelo para todos os itens<select value={batchTemplateId} onChange={e => setBatchTemplateId(e.target.value)}>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+        <label className="batch-font-select">Fonte para o lote<select value={batchFontId} onChange={e => setBatchFontId(e.target.value)}>
+          <option value="">Usar fonte padrão do modelo</option>{fonts.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+        </select></label>
         <div className="batch-columns"><span>PRODUTO</span><span>PREÇO DE</span><span>PREÇO POR</span><span>UNIDADE</span></div>
-        <textarea rows={9} spellCheck={false} className="batch-input" value={batchText} onChange={e => setBatchText(e.target.value)} placeholder={'CRISTALCOPO COPO PS 150ML 100UN\t99,90\t78,75\tCX C/ 25PC X 100UND\nSACOLA NEWPLAST M\t39,90\t34,50\tFD C/ 1000 UN'}/>
-        <p className="batch-hint"><FileSpreadsheet size={15}/> Aceita colunas separadas por TAB (Excel) ou ponto e vírgula (;). Preço antigo pode ficar vazio. Até 200 cartazes por envio.</p>
-        <div className="batch-file-actions"><button className="link-action" onClick={downloadCsvSample}><Download size={16}/> Baixar CSV de exemplo</button><button className="link-action" onClick={() => batchFileRef.current?.click()}><UploadCloud size={16}/> Importar CSV / TSV</button></div>
-        <input ref={batchFileRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" className="sr-only" onChange={event => { const selected = event.target.files?.[0]; if (selected) void selected.text().then(text => setBatchText(text.replace(/^\uFEFF/, ''))).catch(error => notify(cleanError(error), true)); event.target.value = '' }}/></div>
-        <footer><button className="btn btn-subtle" onClick={() => setBatchOpen(false)}>Cancelar</button><button className="btn btn-primary" disabled={working || !batchText.trim()} onClick={() => { try { void saveBulk().catch(err => notify(cleanError(err), true)) } catch (err) { notify(cleanError(err), true) } }}><UploadCloud size={18}/> Salvar {batchText.split(/\r?\n/).filter(Boolean).length || ''} cartazes</button></footer></section></div>}
+        <textarea rows={9} spellCheck={false} className="batch-input" value={batchText} onChange={e => { setBatchText(e.target.value); setBatchRows(null); setBatchFilename('') }} placeholder={'CRISTALCOPO COPO PS 150ML 100UN\t99,90\t78,75\tCX C/ 25PC X 100UND\nSACOLA NEWPLAST M\t39,90\t34,50\tFD C/ 1000 UN'}/>
+        <p className="batch-hint"><FileSpreadsheet size={15}/> Excel (.xlsx) com colunas A: Produto, B: De, C: Por, D: Unidade; usa a primeira aba. Também aceita colagem do Excel e CSV/TSV. Até 200 itens.</p>
+        {batchFilename && <p className="batch-success"><CheckCircle2 size={16}/> {batchFilename} carregado {batchRows ? `· ${batchRows.length} cartaz(es) validado(s)` : '· revise as linhas antes de salvar'}.</p>}
+        <div className="batch-file-actions"><a className="link-action" href={`${import.meta.env.BASE_URL}exemplo-cartazes.xlsx`} download="exemplo-cartazes.xlsx"><FileSpreadsheet size={16}/> Baixar Excel de exemplo</a>
+        <button className="link-action" onClick={() => batchFileRef.current?.click()}><UploadCloud size={16}/> Importar Excel (.xlsx), CSV ou TSV</button>
+        <button className="link-action" onClick={downloadCsvSample}><Download size={16}/> Baixar CSV</button></div>
+        <input ref={batchFileRef} type="file" accept=".xlsx,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain" className="sr-only" onChange={event => {
+          const selected = event.target.files?.[0]
+          event.target.value = ''
+          if (!selected) return
+          if (/\.xlsx$/i.test(selected.name)) {
+            void importExcel(selected, batchTemplateId, batchFontId || null).then(rows => {
+              setBatchRows(rows); setBatchFilename(selected.name)
+              setBatchText(rows.map(row => [row.product_name, row.price_from ?? '', row.price_to, row.unit_label].join('\t')).join('\n'))
+              notify(`${rows.length} itens do Excel carregados. Revise e clique em Salvar.`)
+            }).catch(error => notify(cleanError(error), true))
+          } else if (/\.(csv|tsv|txt)$/i.test(selected.name)) {
+            void selected.text().then(text => { setBatchText(text.replace(/^\uFEFF/, '')); setBatchRows(null); setBatchFilename(selected.name) }).catch(error => notify(cleanError(error), true))
+          } else notify('Arquivo não suportado. Escolha Excel .xlsx, CSV ou TSV.', true)
+        }}/></div>
+        <footer><button className="btn btn-subtle" onClick={() => setBatchOpen(false)}>Cancelar</button><button className="btn btn-primary" disabled={working || !batchText.trim()} onClick={() => { try { void saveBulk().catch(err => notify(cleanError(err), true)) } catch (err) { notify(cleanError(err), true) } }}><UploadCloud size={18}/> Salvar {batchRows?.length || batchText.split(/\r?\n/).filter(Boolean).length || ''} cartazes</button></footer></section></div>}
   </div>
 }
 
 function FontsPage({ fonts, userId, working, onUpload, onDelete }: { fonts: FontAsset[]; userId: string; working: boolean; onUpload: (file: File, name: string) => Promise<void>; onDelete: (font: FontAsset) => Promise<void> }) {
   const [file, setFile] = useState<File | null>(null)
   const [name, setName] = useState('')
-  return <><div className="page-heading"><div><div className="eyebrow muted">PERSONALIZAÇÃO</div><h1>Fontes da equipe</h1><p>Envie fontes licenciadas e aplique-as aos seus modelos.</p></div></div>
+  return <><div className="page-heading"><div><div className="eyebrow muted">PERSONALIZAÇÃO</div><h1>Fontes da equipe</h1><p>Envie fontes licenciadas para aplicar nos modelos ou em cartazes individuais.</p></div></div>
     <div className="fonts-grid"><section className="panel font-upload"><div className="panel-title"><h3>Instalar nova fonte</h3></div><label className="dropzone"><Type size={32}/><strong>{file ? file.name : 'Escolher arquivo de fonte'}</strong><span>TTF, OTF, WOFF ou WOFF2 · Máximo 5 MB</span><input type="file" accept=".ttf,.otf,.woff,.woff2" onChange={e => { const chosen = e.target.files?.[0] || null; setFile(chosen); setName(chosen?.name.replace(/\.[^.]+$/, '') || '') }}/></label>
       <label>Nome de exibição<input value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: Poppins Bold"/></label>
       <button className="btn btn-primary full" disabled={working || !file} onClick={() => { if (file) void onUpload(file, name).then(() => { setFile(null); setName('') }) }}><UploadCloud size={18}/> Adicionar fonte</button><div className="tip-strip compact"><ShieldCheck size={18}/><span>Envie somente fontes que a empresa tem licença para utilizar.</span></div></section>
@@ -439,9 +473,9 @@ function FontsPage({ fonts, userId, working, onUpload, onDelete }: { fonts: Font
   </>
 }
 
-function TemplateEditor({ template, imageUrl, fonts, working, onClose, onSave }: {
+function TemplateEditor({ template, imageUrl, fonts, working, onClose, onSave, onNotify }: {
   template: PosterTemplate | null; imageUrl: string; fonts: FontAsset[]; working: boolean;
-  onClose: () => void; onSave: (input: TemplateInput, file: File | null, existing: PosterTemplate | null) => Promise<void>
+  onClose: () => void; onSave: (input: TemplateInput, file: File | null, existing: PosterTemplate | null) => Promise<void>; onNotify: (text: string, error?: boolean) => void
 }) {
   const [name, setName] = useState(template?.name ?? 'Promoção da Semana · Seridóplast')
   const [zone, setZone] = useState<Zone>({ ...(template?.zone ?? INITIAL_ZONE) })
@@ -458,7 +492,7 @@ function TemplateEditor({ template, imageUrl, fonts, working, onClose, onSave }:
   function onChoose(selected: File | null) {
     if (!selected) return
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(selected.type) || selected.size > 15 * 1024 * 1024) {
-      alert('Envie PNG, JPEG ou WEBP com no máximo 15 MB.'); return
+      onNotify('Envie PNG, JPEG ou WEBP com no máximo 15 MB.', true); return
     }
     const url = URL.createObjectURL(selected)
     setFile(selected); setFileUrl(url)
@@ -535,7 +569,7 @@ export default function App() {
     })
     return () => { live = false; subscription.subscription.unsubscribe() }
   }, [])
-  if (authBusy) return <div className="app-loading"><div className="brand-emblem">S<span>↗</span></div><p>Carregando Seridóplast Cartazes...</p></div>
+  if (authBusy) return <div className="app-loading"><BrandLogo className="loading-logo"/><p>Carregando Seridóplast Cartazes...</p></div>
   if (recovering && user) return <PasswordRecovery onDone={() => setRecovering(false)}/>
   if (!user) return <Login onLogin={setUser}/>
   return <Workspace key={user.id} user={user} onLogout={() => { if (supabase) void supabase.auth.signOut(); else window.location.reload() }}/>

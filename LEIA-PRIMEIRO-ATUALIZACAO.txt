@@ -1,0 +1,34 @@
+SERIDÓPLAST CARTAZES — ATUALIZAÇÃO 1.1
+====================================
+
+Esta versão atualiza o projeto 1.0 existente. Não crie outro Supabase!
+
+1. ANTES DE ATUALIZAR O SITE:
+   Supabase > SQL Editor > New query
+   Copie e execute:
+   supabase/migrations/002_fonte_por_cartaz.sql
+   A migração mantém os cartazes, modelos, fontes e usuários existentes.
+
+2. DEPOIS:
+   Extraia este ZIP.
+   Envie os arquivos de dentro de "seridoplast-cartazes" ao repositório GitHub existente,
+   substituindo o conteúdo correspondente. Preserve os Secrets do GitHub já cadastrados.
+   Não remova nem altere a pasta .github/workflows.
+   Faça commit na branch main.
+
+3. ACOMPANHE:
+   GitHub > Actions > Publicar no GitHub Pages (precisa ficar verde).
+   Abra o site e atualize com Ctrl+F5.
+
+MUDANÇAS:
+- Nova marca em modo claro e escuro + favicon SVG/PNG.
+- Importação de planilhas Excel (.xlsx) em lote; primeira aba, colunas A-D.
+- Planilha de exemplo em public/exemplo-cartazes.xlsx.
+- Mensagens flutuantes somem após 2 segundos.
+- Fonte por cartaz, herdando a do modelo por padrão.
+- Escolha da fonte para um lote inteiro.
+
+LIMITAÇÃO DO TESTE:
+- A sintaxe das fontes TypeScript/TSX foi verificada.
+- A instalação npm e build completo não puderam ser testados neste ambiente.
+- Confirme a compilação pelo GitHub Actions após enviar.

@@ -96,3 +96,15 @@
 /* v2.0.3 — prévia interativa para validar cartazes sem preço DE. */
 .preview-no-de{display:inline-flex;align-items:center;gap:9px;justify-content:center;margin:4px auto 14px;font-size:12px;font-weight:700;color:var(--text);cursor:pointer;background:var(--hover);border:1px solid var(--line);border-radius:9px;padding:9px 12px;}
 .preview-no-de input{margin:0;}
+
+/* v2.0.5: cadastro rápido na montagem e indicação da margem de impressão */
+.quick-add-row{padding:0 18px 13px}
+.quick-add-row .btn{justify-content:center;min-height:38px;border-style:dashed}
+.quick-product-modal{max-width:535px}
+.quick-product-fields{display:grid;gap:16px}
+.quick-product-fields .price-fields{margin:0}
+.quick-product-note{display:flex;align-items:flex-start;gap:9px;font-size:11px;line-height:1.55;color:var(--muted);margin:0;padding:11px 13px;border-radius:9px;background:var(--hover)}
+.quick-product-note svg{flex:none;color:var(--red)}
+.quick-product-modal>footer{display:flex;justify-content:flex-end;gap:11px}
+.print-margin-info{white-space:nowrap;font-size:11px;color:var(--muted);font-weight:650}
+@media(max-width:760px){.print-margin-info{width:100%;white-space:normal}}

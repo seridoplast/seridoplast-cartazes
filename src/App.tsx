@@ -146,6 +146,8 @@ function Workspace({ user, onLogout }: Props) {
   const [layout, setLayout] = useState<ExportLayout>('single')
   const [repeatLast, setRepeatLast] = useState(true)
   const [keepAfterExport, setKeepAfterExport] = useState(false)
+  const [quickProductOpen, setQuickProductOpen] = useState(false)
+  const [quickProductForm, setQuickProductForm] = useState<ProductInput>(blankProduct())
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchText, setBatchText] = useState('')
   const batchFileRef = useRef<HTMLInputElement>(null)
@@ -239,6 +241,10 @@ function Workspace({ user, onLogout }: Props) {
     } : blankProduct())
     setPage('products'); setMobileNav(false)
   }
+  function openQuickProduct() {
+    setQuickProductForm(blankProduct())
+    setQuickProductOpen(true)
+  }
   function addProduct(product: CatalogProduct) {
     if (!templates.length) { notify('Cadastre um modelo primeiro.', true); setPage('templates'); return }
     const item: PrintItem = { ...product, id: id(), product_id: product.id,
@@ -260,33 +266,50 @@ function Workspace({ user, onLogout }: Props) {
       notify('Área de montagem limpa. Biblioteca preservada.')
     }
   }
-  async function saveProduct() {
-    const item = cleanProduct(productForm)
+  // Mesmo cadastro utilizado pela página Produtos e pelo popup da montagem.
+  async function persistProduct(form: ProductInput, editing: CatalogProduct | null) {
+    const item = cleanProduct(form)
     if (item.product_name.length < 2 || item.product_name.length > 350 || item.unit_label.length > 180) {
-      notify('Confira nome do produto e apresentação.', true); return
+      throw new Error('Confira nome do produto e apresentação.')
     }
-    if (!Number.isFinite(item.price_to) || item.price_to <= 0) { notify('Informe um preço POR válido.', true); return }
-    const duplicate = products.find(p => p.id !== productEditing?.id && productKey(p) === productKey(item))
-    if (duplicate) { notify('Esse produto e apresentação já estão cadastrados. Edite o item existente.', true); return }
-    await run(async () => {
-      if (supabase) {
-        const response = productEditing
-          ? await supabase.from('posters').update(item).eq('id', productEditing.id).select(PRODUCT_API_COLUMNS).single()
-          : await supabase.from('posters').insert({ ...item, owner_id: user.id, template_id: null }).select(PRODUCT_API_COLUMNS).single()
-        if (response.error) {
-          if (response.error.code === '23502' && response.error.message.includes('template_id')) {
-            throw new Error('Execute a migração 005 no SQL Editor: ela permite cadastrar produtos sem vincular a modelos.')
-          }
-          throw response.error
+    if (!Number.isFinite(item.price_to) || item.price_to <= 0) {
+      throw new Error('Informe um preço POR válido.')
+    }
+    const duplicate = products.find(p => p.id !== editing?.id && productKey(p) === productKey(item))
+    if (duplicate) throw new Error('Esse produto e apresentação já estão cadastrados. Edite o item existente.')
+    if (supabase) {
+      const response = editing
+        ? await supabase.from('posters').update(item).eq('id', editing.id).select(PRODUCT_API_COLUMNS).single()
+        : await supabase.from('posters').insert({ ...item, owner_id: user.id, template_id: null }).select(PRODUCT_API_COLUMNS).single()
+      if (response.error) {
+        if (response.error.code === '23502' && response.error.message.includes('template_id')) {
+          throw new Error('O projeto Supabase conectado ainda exige template_id. Confira a migração 005 nesse projeto.')
         }
-        await refresh()
-      } else {
-        const updated: CatalogProduct = { ...item, id: productEditing?.id || id(), owner_id: productEditing?.owner_id || user.id,
-          created_at: productEditing?.created_at || NOW(), updated_at: NOW() }
-        setProducts(prev => [updated, ...prev.filter(p => p.id !== updated.id)])
+        throw response.error
       }
-      setProductEditing(null); setProductForm(blankProduct())
+      await refresh()
+    } else {
+      const updated: CatalogProduct = { ...item, id: editing?.id || id(), owner_id: editing?.owner_id || user.id,
+        created_at: editing?.created_at || NOW(), updated_at: NOW() }
+      setProducts(prev => [updated, ...prev.filter(p => p.id !== updated.id)])
+    }
+  }
+  async function saveProduct() {
+    await run(async () => {
+      await persistProduct(productForm, productEditing)
+      setProductEditing(null)
+      setProductForm(blankProduct())
     }, productEditing ? 'Cadastro atualizado na biblioteca.' : 'Produto cadastrado e disponível para todos.')
+  }
+  async function saveQuickProduct() {
+    if (working) return
+    await run(async () => {
+      await persistProduct(quickProductForm, null)
+      // A busca é limpa para que o produto recém-criado apareça no topo da biblioteca.
+      setSearch('')
+      setQuickProductOpen(false)
+      setQuickProductForm(blankProduct())
+    }, 'Produto salvo! Ele já está disponível na biblioteca à esquerda.')
   }
   async function deleteProduct(product: CatalogProduct) {
     if (product.owner_id !== user.id) { notify('Somente o criador pode excluir este cadastro.', true); return }
@@ -475,10 +498,11 @@ function Workspace({ user, onLogout }: Props) {
         <div className="how-to"><div className="how-icon"><WandSparkles size={22}/></div><div><strong>Fluxo recomendado</strong><p>1. Cadastre os produtos → 2. Escolha um modelo → 3. Adicione itens à montagem → 4. Exporte o PDF. A montagem é limpa; o catálogo fica salvo.</p></div></div>
       </>}
       {page === 'posters' && <>
-        <div className="page-heading"><div><div className="eyebrow muted">MONTAGEM TEMPORÁRIA</div><h1>Montar cartazes</h1><p>O produto fica na biblioteca; o modelo e os valores desta impressão não alteram o cadastro.</p></div><div className="page-buttons"><button className="btn btn-subtle" onClick={() => openProduct()}><Plus size={17}/> Cadastrar produto</button><button className="btn btn-outline" onClick={clearSession} disabled={!sessionItems.length}><Trash2 size={16}/> Limpar montagem</button></div></div>
+        <div className="page-heading"><div><div className="eyebrow muted">MONTAGEM TEMPORÁRIA</div><h1>Montar cartazes</h1><p>O produto fica na biblioteca; o modelo e os valores desta impressão não alteram o cadastro.</p></div><div className="page-buttons"><button className="btn btn-subtle" onClick={openQuickProduct}><Plus size={17}/> Cadastrar produto</button><button className="btn btn-outline" onClick={clearSession} disabled={!sessionItems.length}><Trash2 size={16}/> Limpar montagem</button></div></div>
         <div className="print-toolbar"><div className="print-left"><label className="inline-choice">Modelo inicial <select value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)}>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label><span className="session-count">{sessionItems.length} cartaz(es) nesta montagem</span></div>
           <div className="print-right"><label className="inline-choice">Distribuição <select value={layout} onChange={e => setLayout(e.target.value as ExportLayout)}><option value="single">1 por A4</option><option value="double">2 por A4</option></select></label>
             {layout === 'double' && <label className="repeat-toggle"><input type="checkbox" checked={repeatLast} onChange={e => setRepeatLast(e.target.checked)}/> Repetir último</label>}
+            <span className="print-margin-info" title="Área imprimível com 4 mm de respiro nas bordas">Margem estreita · 4 mm{layout === 'double' ? ' · corte tracejado' : ''}</span>
             <label className="repeat-toggle"><input type="checkbox" checked={keepAfterExport} onChange={e => setKeepAfterExport(e.target.checked)}/> Manter após PDF</label>
             <button className="btn btn-primary" disabled={working || !sessionItems.length} onClick={() => void doExport(sessionItems)}><FileDown size={17}/>{working && exportProgress ? exportProgress : 'Exportar e finalizar'}</button></div></div>
         <div className="session-strip"><div className="session-strip-heading"><strong>Cartazes desta impressão</strong><span>{sessionItems.length ? 'Clique em um item para ajustar somente esta impressão.' : 'Adicione produtos da biblioteca abaixo.'}</span></div>
@@ -487,6 +511,7 @@ function Workspace({ user, onLogout }: Props) {
             <button className="session-chip-remove" onClick={() => removeItem(item.id)} aria-label={`Remover ${item.product_name} desta montagem`} title="Remover da montagem"><X size={15}/></button>
           </div>) : <div className="session-empty">Nenhum cartaz nesta montagem. A arte do modelo começa em branco.</div>}</div></div>
         <div className="work-grid"><section className="poster-list panel"><div className="panel-title"><h3>Biblioteca de produtos <span className="count-chip">{filtered.length}</span></h3></div><div className="search-box"><Search size={18}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar produtos cadastrados..."/></div>
+          <div className="quick-add-row"><button className="btn btn-outline full" onClick={openQuickProduct} disabled={working || !!catalogError}><Plus size={17}/> Adicionar produto à biblioteca</button></div>
           {filtered.length > 250 && <p className="catalog-list-info">Exibindo 250 de {filtered.length} itens. Pesquise para encontrar os demais.</p>}<div className="list-scroll">{filtered.length ? filtered.slice(0, 250).map(product => <div className="poster-row" key={product.id}>
             <button className="poster-row-body" onClick={() => addProduct(product)} title="Adicionar à montagem"><strong>{product.product_name}</strong><span>{product.unit_label || 'Unidade não informada'}</span><div><b>R$ {money(product.price_to)}</b> {product.price_from !== null && <del>R$ {money(product.price_from)}</del>}</div></button>
             <button className="icon-button add-list-item" onClick={() => addProduct(product)} title="Adicionar ao cartaz" aria-label={`Adicionar ${product.product_name}`}><Plus size={18}/></button></div>) : <div className="empty-list"><FolderOpen size={28}/><strong>Nenhum produto encontrado</strong><p>Cadastre ou importe produtos no catálogo.</p></div>}</div>
@@ -506,7 +531,7 @@ function Workspace({ user, onLogout }: Props) {
               <div className="session-edit-note"><ShieldCheck size={17}/> As alterações acima não mudam o preço da biblioteca. Para atualizar o cadastro, abra Produtos.</div>
               <button className="btn btn-outline full" onClick={() => { const copy = { ...activeSession, id: id() }; setSessionItems(prev => [...prev, copy]); setSelectedSessionId(copy.id) }}><CopyPlus size={17}/> Duplicar nesta montagem</button>
               <button className="danger-link" onClick={() => removeItem(activeSession.id)}><Trash2 size={16}/> Remover desta montagem</button>
-            </div> : <div className="empty-editor"><FilePlus2 size={28}/><p>Escolha um produto à esquerda. Ele será adicionado ao modelo somente para esta impressão.</p><button className="btn btn-outline" onClick={() => openProduct()}><Plus size={16}/> Cadastrar produto</button></div>}
+            </div> : <div className="empty-editor"><FilePlus2 size={28}/><p>Escolha um produto à esquerda. Ele será adicionado ao modelo somente para esta impressão.</p><button className="btn btn-outline" onClick={openQuickProduct}><Plus size={16}/> Cadastrar produto</button></div>}
           </section></div>
       </>}
       {page === 'products' && <>
@@ -540,6 +565,19 @@ function Workspace({ user, onLogout }: Props) {
       <footer className="app-footer"><span>Seridóplast <b>•</b> Cartazes de preço</span><span>Acreditamos na força do trabalho!</span></footer>
     </div>
     {toast && <div role="status" className={`toast ${toast.error ? 'error' : ''}`}>{toast.error ? <CircleHelp size={19}/> : <CheckCircle2 size={19}/>}<span>{toast.text}</span><button onClick={() => setToast(null)} aria-label="Fechar aviso"><X size={17}/></button></div>}
+    {quickProductOpen && <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (!working && event.target === event.currentTarget) setQuickProductOpen(false) }}>
+      <form className="modal quick-product-modal" role="dialog" aria-modal="true" aria-labelledby="quick-product-title" onSubmit={event => { event.preventDefault(); void saveQuickProduct() }}>
+        <header><div><div className="eyebrow muted">CADASTRO RÁPIDO</div><h2 id="quick-product-title">Adicionar produto</h2><p>Salve na biblioteca compartilhada, sem sair da montagem.</p></div><button type="button" className="icon-button" onClick={() => setQuickProductOpen(false)} aria-label="Fechar" disabled={working}><X size={20}/></button></header>
+        <div className="modal-content quick-product-fields">
+          <label>Nome do produto <span className="required">*</span><textarea rows={3} autoFocus required minLength={2} maxLength={350} value={quickProductForm.product_name} placeholder="Ex.: CRISTALCOPO COPO PS 150ML 100UN" onChange={event => setQuickProductForm(prev => ({ ...prev, product_name: event.target.value }))}/></label>
+          <label>Apresentação / unidade<input maxLength={180} value={quickProductForm.unit_label} placeholder="Ex.: CX C/ 25PC X 100UND" onChange={event => setQuickProductForm(prev => ({ ...prev, unit_label: event.target.value }))}/></label>
+          <div className="price-fields"><label>Preço DE (opcional)<span className="input-prefix">R$</span><CurrencyInput value={quickProductForm.price_from} onChange={value => setQuickProductForm(prev => ({ ...prev, price_from: value }))} placeholder="99,90"/></label>
+            <label>Preço POR <span className="required">*</span><span className="input-prefix">R$</span><CurrencyInput value={quickProductForm.price_to} onChange={value => setQuickProductForm(prev => ({ ...prev, price_to: value ?? 0 }))} placeholder="78,75"/></label></div>
+          <p className="quick-product-note"><ShieldCheck size={16}/> Ao salvar, o produto aparecerá na lista à esquerda e poderá ser usado em qualquer modelo.</p>
+        </div>
+        <footer><button type="button" className="btn btn-subtle" onClick={() => setQuickProductOpen(false)} disabled={working}>Cancelar</button><button type="submit" className="btn btn-primary" disabled={working || !!catalogError || quickProductForm.product_name.trim().length < 2 || !Number.isFinite(quickProductForm.price_to) || quickProductForm.price_to <= 0}><Save size={18}/>{working ? 'Salvando...' : 'Salvar produto'}</button></footer>
+      </form>
+    </div>}
     {batchOpen && <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setBatchOpen(false) }}><section className="modal batch-modal" role="dialog" aria-modal="true" aria-label="Importar produtos"><header><div><div className="eyebrow muted">BIBLIOTECA DE PRODUTOS</div><h2>Importar produtos em lote</h2><p>Os itens ficarão disponíveis em qualquer modelo, sem criar cartazes persistentes.</p></div><button className="icon-button" onClick={() => setBatchOpen(false)} aria-label="Fechar"><X size={20}/></button></header>
       <div className="modal-content"><div className="batch-columns"><span>PRODUTO</span><span>PREÇO DE</span><span>PREÇO POR</span><span>UNIDADE</span></div>
         <textarea rows={9} spellCheck={false} className="batch-input" value={batchText} onChange={e => { setBatchText(e.target.value); setBatchRows(null); setBatchFilename('') }} placeholder={'CRISTALCOPO COPO PS 150ML 100UN\t99,90\t78,75\tCX C/ 25PC X 100UND\nSACOLA NEWPLAST M\t39,90\t34,50\tFD C/ 1000 UN'}/>
@@ -566,12 +604,12 @@ function Workspace({ user, onLogout }: Props) {
 
 function TutorialPage({ onBegin, onProducts, onTemplates }: { onBegin: () => void; onProducts: () => void; onTemplates: () => void }) {
   const steps = [
-    ['1', 'Cadastre os produtos', 'Abra Produtos e clique em Novo produto. Informe descrição, apresentação, preço DE (opcional) e preço POR. O cadastro será compartilhado e reutilizável.'],
+    ['1', 'Cadastre os produtos', 'Na tela de montagem, clique em Adicionar produto abaixo da busca, preencha o popup e salve. Informe descrição, apresentação, preço DE (opcional) e preço POR. O cadastro será compartilhado e reutilizável.'],
     ['2', 'Importe uma planilha Excel', 'Em Produtos ou na montagem, escolha Importar Excel. Use as colunas A Produto, B De, C Por e D Unidade. Confirme para adicionar somente os produtos ainda não cadastrados.'],
     ['3', 'Crie ou escolha um modelo', 'Em Modelos, envie uma arte PNG/JPG vertical. Marque a área de conteúdo e abra a aba Elementos para arrastar cada texto e preço, inclusive DE com R$. Clique em Salvar modelo.'],
     ['4', 'Monte a impressão', 'Entre em Montar cartazes, selecione o modelo e clique nos produtos da biblioteca. Eles entram na fila desta sessão, sem criar registros novos de cartazes no Supabase.'],
     ['5', 'Ajuste somente esta impressão', 'Clique em um cartaz da fila. Altere valores, descrição, fonte ou modelo no painel lateral. Esses ajustes não modificam o cadastro do produto.'],
-    ['6', 'Exporte e finalize', 'Escolha 1 ou 2 cartazes por A4 e clique em Exportar e finalizar. Após solicitar o download do PDF, a montagem é limpa. Marque Manter após PDF se precisar reimprimir.'],
+    ['6', 'Exporte e finalize', 'Escolha 1 ou 2 cartazes por A4. O PDF terá margem estreita de 4 mm; na folha dividida, uma linha tracejada central marca o corte. Após solicitar o download, a montagem é limpa, a menos que você marque Manter após PDF.'],
   ]
   return <>
     <div className="page-heading"><div><div className="eyebrow muted">CENTRAL DE AJUDA</div><h1>Como usar o sistema</h1><p>Guia prático do Seridóplast Cartazes, desde o cadastro até a impressão.</p></div><button className="btn btn-primary" onClick={onBegin}><Plus size={17}/> Montar agora</button></div>
@@ -582,7 +620,7 @@ function TutorialPage({ onBegin, onProducts, onTemplates }: { onBegin: () => voi
       <details><summary>Depois de gerar o PDF, perco os produtos?</summary><p>Não. Apenas a fila de cartazes é limpa. Todos os produtos, modelos e fontes continuam disponíveis para a equipe.</p></details>
       <details><summary>Como movimentar o nome e os preços na arte?</summary><p>Abra Modelos → Editar → Elementos. Arraste as caixas pela superfície e ajuste o tamanho pelo canto. Clique em Salvar modelo para que toda a equipe use o novo posicionamento.</p></details>
       <details><summary>O que acontece se eu não preencher o preço DE?</summary><p>O cartaz mostra apenas o valor principal: “Por:” desaparece e nome, preço e unidade ficam mais próximos, sem deixar o espaço vazio de promoção.</p></details><details><summary>Como ficam o R$ e o texto POR?</summary><p>Com preço DE preenchido, aparece “De: R$” com o valor riscado e “Por:” acima do R$ menor, ao lado do valor grande. Se você desmarcar “Mostrar R$” no modelo, o “Por:” mantém a posição original acima do preço. Com preço DE vazio, o “Por:” é sempre ocultado.</p></details>
-      <details><summary>Como imprimir no tamanho correto?</summary><p>Abra o PDF e escolha papel A4, escala 100% ou tamanho real. Evite “Ajustar à página”, que pode alterar as medidas do cartaz.</p></details>
+      <details><summary>Como imprimir no tamanho correto?</summary><p>O PDF já vem com margem estreita de 4 mm em ambos os formatos. Se usar 2 cartazes por A4, a linha tracejada central indica onde cortar. Imprima em A4 com escala 100% ou tamanho real e evite “Ajustar à página”.</p></details>
     </section>
     <div className="tutorial-actions"><button className="btn btn-outline" onClick={onProducts}><FolderOpen size={17}/> Cadastrar produto</button><button className="btn btn-outline" onClick={onTemplates}><ImagePlus size={17}/> Configurar modelos</button><button className="btn btn-primary" onClick={onBegin}><FileDown size={17}/> Começar montagem</button></div>
   </>

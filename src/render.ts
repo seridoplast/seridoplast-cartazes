@@ -258,6 +258,17 @@ export async function paintPoster(
     unit.w, unit.h, width * style.unitScale, fontFamily, style.unitColor, 3, width * .019)
 }
 
+// Reservamos uma borda segura para impressoras sem impressão sem margens.
+// Centraliza a arte sem deformá-la, preservando a proporção A4 / A5.
+const PDF_MARGIN_MM = 4
+const PDF_CUT_GAP_MM = 2
+function addFittedPoster(doc: jsPDF, image: string, x: number, y: number, w: number, h: number) {
+  const ratio = 210 / 297
+  const drawW = Math.min(w, h * ratio)
+  const drawH = drawW / ratio
+  doc.addImage(image, 'JPEG', x + (w - drawW) / 2, y + (h - drawH) / 2, drawW, drawH, undefined, 'FAST')
+}
+
 export async function exportPostersPDF(options: {
   posters: Poster[]
   templates: PosterTemplate[]
@@ -285,8 +296,24 @@ export async function exportPostersPDF(options: {
     const font = fonts.find(f => f.id === (poster.font_id || template.style.fontId))
     await paintPoster(canvas, template, poster, url, font?.family ?? 'Arial', 1654)
     const data = canvas.toDataURL('image/jpeg', .94)
-    if (isDouble) doc.addImage(data, 'JPEG', index % 2 === 0 ? 0 : 148.5, 0, 148.5, 210, undefined, 'FAST')
-    else doc.addImage(data, 'JPEG', 0, 0, 210, 297, undefined, 'FAST')
+    if (isDouble) {
+      // Cada lado tem margens laterais próprias. O vão central mantém visível a guia de corte.
+      const halfWidth = 297 / 2
+      const x = index % 2 === 0 ? PDF_MARGIN_MM : halfWidth + PDF_CUT_GAP_MM
+      const w = halfWidth - PDF_MARGIN_MM - PDF_CUT_GAP_MM
+      addFittedPoster(doc, data, x, PDF_MARGIN_MM, w, 210 - PDF_MARGIN_MM * 2)
+      if (index % 2 === 0) {
+        // A guia é desenhada inclusive quando há apenas um cartaz na última folha.
+        doc.setDrawColor(110, 110, 110)
+        doc.setLineWidth(0.24)
+        doc.setLineDashPattern([2, 1.8], 0)
+        doc.line(halfWidth, PDF_MARGIN_MM, halfWidth, 210 - PDF_MARGIN_MM)
+        doc.setLineDashPattern([], 0)
+      }
+    } else {
+      addFittedPoster(doc, data, PDF_MARGIN_MM, PDF_MARGIN_MM,
+        210 - PDF_MARGIN_MM * 2, 297 - PDF_MARGIN_MM * 2)
+    }
     onProgress?.(index + 1, queue.length)
   }
   const stamp = new Date().toISOString().slice(0, 10)

@@ -187,7 +187,6 @@ export async function paintPoster(
   let priceSize = Math.min(width * style.priceScale, price.h * .92)
   const minPriceSize = width * .04
   const rightEdge = price.x + price.w * .985
-  const leftEdge = price.x + price.w * .015
   const gapFor = (size: number) => Math.max(3, size * .045)
   const currencySizeFor = (size: number) => Math.max(width * .015, size * .34)
   const setFont = (size: number) => { ctx.font = `800 ${size}px "${fontFamily}", Arial, sans-serif` }
@@ -195,27 +194,29 @@ export async function paintPoster(
 
   let currencyX = 0
   let numberX = 0
-  // Mantém o "Por:" independente e na posição ajustada pelo usuário,
-  // usando seu centro como referência para a coluna compacta R$ / Por.
+  // Centraliza o conjunto R$ + valor na área do preço, independentemente
+  // da posição do campo Por: e da presença do preço DE.
   const porCenterX = por.x + por.w / 2
+  const centeredPriceGroup = (size: number) => {
+    const currencyWidth = textWidth('R$', currencySizeFor(size))
+    const numberWidth = textWidth(number, size)
+    const gapX = gapFor(size)
+    const groupWidth = currencyWidth + gapX + numberWidth
+    const groupStart = price.x + (price.w - groupWidth) / 2
+    return {
+      currencyX: groupStart + currencyWidth / 2,
+      numberX: groupStart + currencyWidth + gapX,
+      groupWidth
+    }
+  }
   for (; priceSize > minPriceSize; priceSize -= 2) {
     const numberWidth = textWidth(number, priceSize)
     if (!showCurrency) {
       if (numberWidth <= price.w * .97) break
       continue
     }
-    const currencySize = currencySizeFor(priceSize)
-    const currencyWidth = textWidth('R$', currencySize)
-    const gapX = gapFor(priceSize)
-    if (hasOldPrice) {
-      currencyX = Math.max(leftEdge + currencyWidth / 2, porCenterX)
-      numberX = currencyX + currencyWidth / 2 + gapX
-    } else {
-      const groupWidth = currencyWidth + gapX + numberWidth
-      currencyX = leftEdge + Math.max(0, (rightEdge - leftEdge - groupWidth) / 2) + currencyWidth / 2
-      numberX = currencyX + currencyWidth / 2 + gapX
-    }
-    if (numberX + numberWidth <= rightEdge) break
+    const group = centeredPriceGroup(priceSize)
+    if (group.groupWidth <= price.w * .97) break
   }
   priceSize = Math.max(minPriceSize, priceSize)
   const priceTop = price.y + Math.max(0, (price.h - priceSize) / 2)
@@ -225,20 +226,14 @@ export async function paintPoster(
     // Recalcula usando o tamanho final, inclusive caso a largura seja muito pequena.
     const currencySize = currencySizeFor(priceSize)
     const currencyWidth = textWidth('R$', currencySize)
-    const numberWidth = textWidth(number, priceSize)
-    const gapX = gapFor(priceSize)
-    if (hasOldPrice) {
-      currencyX = Math.max(leftEdge + currencyWidth / 2, porCenterX)
-      numberX = currencyX + currencyWidth / 2 + gapX
-    } else {
-      const groupWidth = currencyWidth + gapX + numberWidth
-      currencyX = leftEdge + Math.max(0, (rightEdge - leftEdge - groupWidth) / 2) + currencyWidth / 2
-      numberX = currencyX + currencyWidth / 2 + gapX
-    }
-    // O 'R$' fica menor e mais baixo, alinhado à base do preço principal.
+    const group = centeredPriceGroup(priceSize)
+    currencyX = group.currencyX
+    numberX = group.numberX
+    // Prefixo pequeno alinhado à parte inferior do número, porém um pouco
+    // mais alto para equilibrar visualmente a linha do preço.
     setFont(currencySize)
     ctx.textAlign = 'center'
-    ctx.fillText('R$', currencyX, priceTop + priceSize * .60)
+    ctx.fillText('R$', currencyX, priceTop + priceSize * .53)
     setFont(priceSize)
     ctx.textAlign = 'left'
     ctx.fillText(number, numberX, priceTop, Math.max(1, rightEdge - numberX))

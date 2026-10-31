@@ -1,3 +1,29 @@
+# Seridóplast Cartazes v2.0
+
+**Se já utiliza a versão 1.2.1:** siga `LEIA-PRIMEIRO-V2.txt` e execute somente a migração `supabase/migrations/004_biblioteca_produtos.sql`. Não execute `setup.sql` novamente.
+
+Produtos cadastrados na tabela `catalog_products` são independentes dos modelos. O editor de modelos salva posições de cinco elementos (nome, DE, POR, preço e apresentação) no campo JSON `poster_templates.style.elements`. A montagem temporária fica apenas no armazenamento da aba do navegador, separada por usuário, e é limpa quando o PDF é gerado, a menos que a opção de manter esteja marcada. Os cartazes antigos em `posters` são migrados para o catálogo sem serem apagados.
+
+## Uso
+
+1. Cadastre ou importe os produtos na Biblioteca de Produtos.
+2. Crie ou edite um modelo, arrastando cada elemento na aba Elementos.
+3. Entre em Montar Cartazes, selecione um modelo e clique nos produtos a imprimir.
+4. Faça alterações de preço apenas para esta impressão, sem alterar o catálogo.
+5. Exporte em A4 (um ou dois por folha); a montagem é limpa após o download ser solicitado.
+
+Consulte o Tutorial de uso dentro do sistema.
+
+## Publicação
+
+O GitHub Actions faz o build a partir dos Secrets `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`. O Vite utiliza `base: './'` para funcionar no GitHub Pages em subdiretório.
+
+## Implantação inicial
+
+Apenas projetos novos devem executar `supabase/setup.sql` antes da migração 004. Em projetos existentes, use somente a migração 004. Garanta que `public.catalog_products`, `public.poster_templates` e `public.font_assets` estejam habilitadas em **Data API > Exposed tables** e protegidas por RLS.
+
+## Histórico v1.2
+
 # Seridóplast Cartazes · v1.1 🖨️
 
 Editor web colaborativo de cartazes de preço, pronto para **GitHub Pages + Supabase**. Desenvolvido a partir dos dois exemplos fornecidos pela Seridóplast.

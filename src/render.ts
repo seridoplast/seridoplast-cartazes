@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf'
-import type { FontAsset, Poster, PosterStyle, PosterTemplate } from './types'
+import type { FontAsset, Poster, PosterElement, PosterStyle, PosterTemplate, Zone } from './types'
 import { INITIAL_STYLE } from './types'
 
 const imageCache = new Map<string, Promise<HTMLImageElement>>()
@@ -79,6 +79,27 @@ function drawFitText(
   lines.forEach((line, i) => ctx.fillText(line, centerX, start + i * size * 1.1, maxWidth))
 }
 
+/** Elementos normalizados em relação à página inteira, para que editor, PDF e prévia coincidam. */
+export function defaultElementZones(zone: Zone): Record<PosterElement, Zone> {
+  const z = (x: number, y: number, w: number, h: number): Zone => ({
+    x: zone.x + zone.w * x, y: zone.y + zone.h * y, w: zone.w * w, h: zone.h * h
+  })
+  return {
+    title: z(.02, .015, .96, .255), old: z(.05, .28, .90, .14),
+    por: z(.06, .40, .34, .12), price: z(.02, .46, .96, .34),
+    unit: z(.02, .81, .96, .18)
+  }
+}
+export const ELEMENT_LABELS: Record<PosterElement, string> = {
+  title: 'Nome do produto', old: 'Preço DE', por: 'Texto POR',
+  price: 'Preço principal', unit: 'Unidade'
+}
+export const POSTER_ELEMENTS: PosterElement[] = ['title', 'old', 'por', 'price', 'unit']
+
+export function elementZones(template: PosterTemplate): Record<PosterElement, Zone> {
+  return { ...defaultElementZones(template.zone), ...(template.style?.elements || {}) }
+}
+
 export async function paintPoster(
   canvas: HTMLCanvasElement, template: PosterTemplate, poster: Poster, imageURL: string,
   fontFamily = 'Arial', width = 900
@@ -90,64 +111,62 @@ export async function paintPoster(
   if (!ctx) throw new Error('Seu navegador não permite desenhar o cartaz.')
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, width, height)
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height)
   ctx.drawImage(image, 0, 0, width, height)
-  const zone = template.zone
   const style: PosterStyle = { ...INITIAL_STYLE, ...template.style }
-  const x = zone.x * width, y = zone.y * height, w = zone.w * width, h = zone.h * height
-  const cx = x + w / 2
-  ctx.save()
-  ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip()
-  drawFitText(ctx, poster.product_name.toLocaleUpperCase('pt-BR'), cx, y + h * .015,
-    w * .96, h * .255, width * style.titleScale, fontFamily, style.titleColor, 3, width * .019)
+  const parts = elementZones(template)
+  const box = (key: PosterElement) => {
+    const z = parts[key]
+    return { x: z.x * width, y: z.y * height, w: z.w * width, h: z.h * height }
+  }
+  const title = box('title')
+  drawFitText(ctx, poster.product_name.toLocaleUpperCase('pt-BR'), title.x + title.w / 2, title.y,
+    title.w, title.h, width * style.titleScale, fontFamily, style.titleColor, 4, width * .017)
+
   if (poster.price_from !== null) {
-    const oldSize = width * style.oldScale
-    ctx.font = `800 ${oldSize}px "${fontFamily}", Arial, sans-serif`
-    const oldText = money(poster.price_from)
-    const labelSize = oldSize * .77
-    const oldWidth = ctx.measureText(oldText).width
-    ctx.font = `800 ${labelSize}px "${fontFamily}", Arial, sans-serif`
-    const labelWidth = ctx.measureText('De: ').width
-    const startX = cx - (oldWidth + labelWidth + width * .01) / 2
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = style.oldColor
-    const oldY = y + h * .29
-    ctx.fillText('De: ', startX, oldY + oldSize * .14)
-    ctx.font = `800 ${oldSize}px "${fontFamily}", Arial, sans-serif`
-    const numberX = startX + labelWidth + width * .01
-    ctx.fillText(oldText, numberX, oldY)
-    const lineY = oldY + oldSize * .53
-    ctx.strokeStyle = style.oldColor; ctx.lineWidth = Math.max(2, width * .005)
-    ctx.beginPath(); ctx.moveTo(numberX, lineY); ctx.lineTo(numberX + oldWidth, lineY); ctx.stroke()
+    const old = box('old')
+    const oldText = `De: R$ ${money(poster.price_from)}`
+    let oldSize = Math.min(width * style.oldScale, old.h * .85)
+    ctx.textBaseline = 'top'; ctx.textAlign = 'center'; ctx.fillStyle = style.oldColor
+    while (oldSize > width * .018) {
+      ctx.font = `800 ${oldSize}px "${fontFamily}", Arial, sans-serif`
+      if (ctx.measureText(oldText).width <= old.w * .98) break
+      oldSize -= 1
+    }
+    ctx.fillText(oldText, old.x + old.w / 2, old.y + Math.max(0, (old.h - oldSize) / 2), old.w)
+    // Risco de promoção sobre o valor antigo (mantém o prefixo 'De: R$' legível).
+    const prefix = 'De: R$ '
+    const number = money(poster.price_from)
+    const fullWidth = ctx.measureText(oldText).width
+    const numberWidth = ctx.measureText(number).width
+    const startNumber = old.x + (old.w - fullWidth) / 2 + ctx.measureText(prefix).width
+    ctx.strokeStyle = style.oldColor; ctx.lineWidth = Math.max(1.5, width * .003)
+    ctx.beginPath()
+    const baselineY = old.y + Math.max(0, (old.h - oldSize) / 2) + oldSize * .54
+    ctx.moveTo(startNumber, baselineY); ctx.lineTo(startNumber + numberWidth, baselineY); ctx.stroke()
   }
-  ctx.fillStyle = style.titleColor
-  ctx.font = `800 ${Math.round(width * .052)}px "${fontFamily}", Arial, sans-serif`
-  ctx.textAlign = 'left'; ctx.textBaseline = 'top'
-  ctx.fillText('Por:', x + w * .06, y + h * .40)
+
+  const por = box('por')
+  drawFitText(ctx, 'Por:', por.x + por.w / 2, por.y, por.w, por.h,
+    width * .052, fontFamily, style.titleColor, 1, width * .018)
+
+  const price = box('price')
   const number = money(poster.price_to)
-  let fontSize = width * style.priceScale
-  ctx.fillStyle = style.priceColor
-  for (; fontSize > width * .08; fontSize -= 2) {
-    ctx.font = `800 ${fontSize}px "${fontFamily}", Arial, sans-serif`
-    if (ctx.measureText(number).width <= w * (style.showCurrency ? .80 : .95) && fontSize < h * .36) break
+  const currency = style.showCurrency ? 'R$ ' : ''
+  const priceText = `${currency}${number}`
+  let priceSize = Math.min(width * style.priceScale, price.h * .92)
+  ctx.textBaseline = 'top'; ctx.textAlign = 'center'; ctx.fillStyle = style.priceColor
+  while (priceSize > width * .065) {
+    ctx.font = `800 ${priceSize}px "${fontFamily}", Arial, sans-serif`
+    if (ctx.measureText(priceText).width <= price.w * .98) break
+    priceSize -= 2
   }
-  ctx.font = `800 ${fontSize}px "${fontFamily}", Arial, sans-serif`
-  const priceWidth = ctx.measureText(number).width
-  const currencySize = width * .051
-  const currencyWidth = style.showCurrency ? width * .11 : 0
-  const groupX = cx - (priceWidth + currencyWidth) / 2
-  const priceY = y + h * .465
-  if (style.showCurrency) {
-    ctx.font = `800 ${currencySize}px "${fontFamily}", Arial, sans-serif`
-    ctx.textAlign = 'left'
-    ctx.fillText('R$', groupX + width * .005, priceY + fontSize * .20)
-  }
-  ctx.font = `800 ${fontSize}px "${fontFamily}", Arial, sans-serif`
-  ctx.textAlign = 'left'
-  ctx.fillText(number, groupX + currencyWidth, priceY)
-  drawFitText(ctx, poster.unit_label.toLocaleUpperCase('pt-BR'), cx, y + h * .81,
-    w * .96, h * .18, width * style.unitScale, fontFamily, style.unitColor, 2, width * .020)
-  ctx.restore()
+  ctx.font = `800 ${priceSize}px "${fontFamily}", Arial, sans-serif`
+  ctx.fillText(priceText, price.x + price.w / 2, price.y + Math.max(0, (price.h - priceSize) / 2), price.w)
+
+  const unit = box('unit')
+  drawFitText(ctx, poster.unit_label.toLocaleUpperCase('pt-BR'), unit.x + unit.w / 2, unit.y,
+    unit.w, unit.h, width * style.unitScale, fontFamily, style.unitColor, 3, width * .019)
 }
 
 export async function exportPostersPDF(options: {

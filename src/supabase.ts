@@ -12,7 +12,7 @@ export function cleanError(error: unknown): string {
   if (error && typeof error === 'object') {
     const detail = error as { code?: unknown; message?: unknown; details?: unknown }
     if (detail.code === 'PGRST204') {
-      return 'O Supabase não reconheceu uma coluna dos cartazes. Execute a migração 003 no SQL Editor e recarregue a página.'
+      return 'A API do Supabase não reconheceu uma coluna. Verifique se a migração da versão 2 foi executada e se a tabela está exposta na Data API.'
     }
     if (typeof detail.message === 'string' && detail.message.trim()) return detail.message
   }

@@ -1,4 +1,6 @@
 export type Zone = { x: number; y: number; w: number; h: number }
+export type PosterElement = 'title' | 'old' | 'por' | 'price' | 'unit'
+export type PosterElementLayout = Partial<Record<PosterElement, Zone>>
 export type PosterStyle = {
   titleScale: number
   priceScale: number
@@ -10,6 +12,7 @@ export type PosterStyle = {
   unitColor: string
   showCurrency: boolean
   fontId: string | null
+  elements?: PosterElementLayout
 }
 export type PosterTemplate = {
   id: string
@@ -23,6 +26,7 @@ export type PosterTemplate = {
   created_at: string
   updated_at?: string
 }
+/** Apenas item da montagem atual; NÃO há gravação na tabela antiga posters. */
 export type Poster = {
   id: string
   template_id: string
@@ -32,10 +36,22 @@ export type Poster = {
   unit_label: string
   font_id: string | null
   owner_id: string
-  updated_by?: string | null
   created_at: string
   updated_at: string
 }
+/** Registro persistente, independente de qualquer arte ou modelo. */
+export type CatalogProduct = {
+  id: string
+  product_name: string
+  price_from: number | null
+  price_to: number
+  unit_label: string
+  owner_id: string
+  created_at: string
+  updated_at: string
+}
+export type PrintItem = Poster & { product_id: string | null }
+export type ProductInput = Pick<CatalogProduct, 'product_name' | 'price_from' | 'price_to' | 'unit_label'>
 export type FontAsset = {
   id: string
   name: string
@@ -45,7 +61,6 @@ export type FontAsset = {
   created_at: string
 }
 export type TemplateInput = Pick<PosterTemplate, 'name' | 'zone' | 'style' | 'image_width' | 'image_height'>
-export type PosterInput = Pick<Poster, 'template_id' | 'product_name' | 'price_from' | 'price_to' | 'unit_label' | 'font_id'>
 export const INITIAL_ZONE: Zone = { x: 0.085, y: 0.354, w: 0.83, h: 0.424 }
 export const INITIAL_STYLE: PosterStyle = {
   titleScale: 0.044,

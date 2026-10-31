@@ -210,3 +210,8 @@ Para bancos criados antes da fonte por cartaz, execute `supabase/migrations/003_
 - Quando **Mostrar R$** está desligado, o “Por:” mantém sua posição independente, como antes, desde que exista um preço DE.
 - Em **Modelos → Editar → Prévia**, marque **Simular cartaz sem preço DE** para comparar os dois layouts.
 - Não há migração SQL para esta atualização.
+
+
+## Ajuste v2.0.6 — título de uma linha
+
+Quando o nome do produto cabe em uma só linha, o renderizador aproxima visualmente o título e o conjunto de preço/unidade, sem alterar as posições salvas no modelo. Cartazes com nomes de duas ou mais linhas mantêm o layout anterior. A regra vale para a prévia e a exportação PDF; não requer migração SQL.

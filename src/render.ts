@@ -58,12 +58,14 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): st
   return lines.length ? lines : ['']
 }
 
-function drawFitText(
-  ctx: CanvasRenderingContext2D, text: string, centerX: number, topY: number,
+// Usa exatamente o mesmo cálculo para medir e desenhar o nome do produto.
+// Assim, a compactação só acontece quando o texto realmente cabe em uma linha,
+// levando em conta a fonte selecionada, o tamanho e a largura do modelo.
+function fitTextLayout(
+  ctx: CanvasRenderingContext2D, text: string, topY: number,
   maxWidth: number, maxHeight: number, initialSize: number, font: string,
-  color: string, maxLines: number, minSize: number
-) {
-  if (!text.trim()) return
+  maxLines: number, minSize: number
+): { size: number; lines: string[]; start: number; bottom: number } {
   let size = initialSize, lines: string[] = []
   for (; size >= minSize; size -= Math.max(1, initialSize * .025)) {
     ctx.font = `800 ${size}px "${font}", Arial, sans-serif`
@@ -72,10 +74,21 @@ function drawFitText(
   }
   size = Math.max(minSize, size)
   ctx.font = `800 ${size}px "${font}", Arial, sans-serif`
-  ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
   lines = wrap(ctx, text, maxWidth).slice(0, maxLines)
   const total = lines.length * size * 1.1
   const start = topY + Math.max(0, (maxHeight - total) / 2)
+  return { size, lines, start, bottom: start + total }
+}
+
+function drawFitText(
+  ctx: CanvasRenderingContext2D, text: string, centerX: number, topY: number,
+  maxWidth: number, maxHeight: number, initialSize: number, font: string,
+  color: string, maxLines: number, minSize: number
+) {
+  if (!text.trim()) return
+  const { size, lines, start } = fitTextLayout(ctx, text, topY, maxWidth, maxHeight, initialSize, font, maxLines, minSize)
+  ctx.font = `800 ${size}px "${font}", Arial, sans-serif`
+  ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'top'
   lines.forEach((line, i) => ctx.fillText(line, centerX, start + i * size * 1.1, maxWidth))
 }
 
@@ -145,13 +158,61 @@ export async function paintPoster(
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height)
   ctx.drawImage(image, 0, 0, width, height)
   const style: PosterStyle = { ...INITIAL_STYLE, ...template.style }
-  const parts = effectiveElementZones(template, poster)
+  let parts = effectiveElementZones(template, poster)
+  const productTitle = poster.product_name.toLocaleUpperCase('pt-BR')
+
+  // Nome em uma linha: aproxima todo o conjunto, preservando as distâncias
+  // internas entre DE / POR / valor / unidade. Nome em 2+ linhas: não altera.
+  // É um ajuste só da renderização (prévia e PDF), sem gravar novas posições.
+  if (productTitle.trim()) {
+    const titleZone = parts.title
+    const titleLayout = fitTextLayout(ctx, productTitle, titleZone.y * height,
+      titleZone.w * width, titleZone.h * height, width * style.titleScale,
+      fontFamily, 4, width * .017)
+    if (titleLayout.lines.length === 1) {
+      let nextTop: number
+      if (poster.price_from !== null) {
+        const old = parts.old
+        const oldText = `De: R$ ${money(poster.price_from)}`
+        let oldSize = Math.min(width * style.oldScale, old.h * height * .85)
+        while (oldSize > width * .018) {
+          ctx.font = `800 ${oldSize}px "${fontFamily}", Arial, sans-serif`
+          if (ctx.measureText(oldText).width <= old.w * width * .98) break
+          oldSize -= 1
+        }
+        nextTop = old.y * height + Math.max(0, (old.h * height - oldSize) / 2)
+      } else {
+        const price = parts.price
+        const approxSize = Math.min(width * style.priceScale, price.h * height * .92)
+        nextTop = price.y * height + Math.max(0, (price.h * height - approxSize) / 2)
+      }
+      // Encurta somente o espaço excessivo depois de um título curto.
+      // O limite impede deslocamentos grandes em modelos personalizados.
+      const desiredGap = width * .036
+      const movePx = Math.min(
+        Math.max(0, nextTop - titleLayout.bottom - desiredGap),
+        template.zone.h * height * .09
+      )
+      if (movePx > 0) {
+        const downTitle = movePx * .35 / height
+        const upDetails = movePx * .65 / height
+        parts = {
+          ...parts,
+          title: { ...parts.title, y: Math.min(1 - parts.title.h, parts.title.y + downTitle) },
+          old: { ...parts.old, y: Math.max(0, parts.old.y - upDetails) },
+          por: { ...parts.por, y: Math.max(0, parts.por.y - upDetails) },
+          price: { ...parts.price, y: Math.max(0, parts.price.y - upDetails) },
+          unit: { ...parts.unit, y: Math.max(0, parts.unit.y - upDetails) }
+        }
+      }
+    }
+  }
   const box = (key: PosterElement) => {
     const z = parts[key]
     return { x: z.x * width, y: z.y * height, w: z.w * width, h: z.h * height }
   }
   const title = box('title')
-  drawFitText(ctx, poster.product_name.toLocaleUpperCase('pt-BR'), title.x + title.w / 2, title.y,
+  drawFitText(ctx, productTitle, title.x + title.w / 2, title.y,
     title.w, title.h, width * style.titleScale, fontFamily, style.titleColor, 4, width * .017)
 
   if (poster.price_from !== null) {

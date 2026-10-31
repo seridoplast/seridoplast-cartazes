@@ -23,6 +23,9 @@ import {
 
 type Page = 'dashboard' | 'posters' | 'products' | 'templates' | 'fonts' | 'tutorial' | 'edit-template'
 type ExportLayout = 'single' | 'double'
+// Modo compatível com o cache atual do PostgREST: a tabela posters já é reconhecida
+// pela API. Os NOVOS produtos têm template_id = NULL (independentes dos modelos).
+const PRODUCT_API_COLUMNS = 'id,product_name,price_from,price_to,unit_label,owner_id,created_at,updated_at'
 const NOW = () => new Date().toISOString()
 const id = () => crypto.randomUUID()
 const DEMO_USER = { id: 'demo', email: 'demonstração@seridoplast.com.br' }
@@ -164,7 +167,7 @@ function Workspace({ user, onLogout }: Props) {
     try {
       const [t, c, f] = await Promise.all([
         supabase.from('poster_templates').select('*').order('created_at', { ascending: false }),
-        supabase.from('catalog_products').select('*').order('updated_at', { ascending: false }).range(0, 999),
+        supabase.from('posters').select(PRODUCT_API_COLUMNS).order('updated_at', { ascending: false }).range(0, 999),
         supabase.from('font_assets').select('*').order('created_at', { ascending: false })
       ])
       if (t.error) throw t.error
@@ -180,7 +183,7 @@ function Workspace({ user, onLogout }: Props) {
       setTemplates(resultTemplates); setFonts(resultFonts); setImageUrls(Object.fromEntries(entries))
       setSelectedTemplateId(prev => resultTemplates.some(t => t.id === prev) ? prev : (resultTemplates[0]?.id || ''))
       if (c.error) {
-        setCatalogError('A biblioteca de produtos ainda não está disponível pela API. Execute supabase/migrations/004_biblioteca_produtos.sql no SQL Editor e habilite a tabela public.catalog_products em Settings → Data API → Exposed tables. Depois atualize.')
+        setCatalogError('Não foi possível ler os produtos pela API. Confira se a tabela public.posters continua acessível no Supabase. Erro: ' + cleanError(c.error))
         console.error('Erro no catálogo:', c.error)
       } else {
         setCatalogError('')
@@ -189,7 +192,7 @@ function Workspace({ user, onLogout }: Props) {
         // Paginação evita desaparecer com produtos quando o catálogo crescer.
         let offset = accumulated.length
         while (offset > 0 && offset % 1000 === 0 && offset < 50000) {
-          const next = await supabase.from('catalog_products').select('*')
+          const next = await supabase.from('posters').select(PRODUCT_API_COLUMNS)
             .order('updated_at', { ascending: false }).range(offset, offset + 999)
           if (next.error) throw next.error
           const chunk = (next.data || []) as CatalogProduct[]
@@ -197,7 +200,16 @@ function Workspace({ user, onLogout }: Props) {
           offset += chunk.length
           if (chunk.length < 1000) break
         }
-        setProducts(accumulated.map(normalizeProduct))
+        // O banco antigo podia registrar o mesmo produto em mais de um cartaz.
+        // A biblioteca mostra só a ocorrência mais recente por nome + apresentação.
+        const seen = new Set<string>()
+        const distinctProducts = accumulated.filter(product => {
+          const key = productKey(product)
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        setProducts(distinctProducts.map(normalizeProduct))
       }
     } catch (error) { notify(`Falha ao carregar dados: ${cleanError(error)}`, true) }
     finally { setLoading(false) }
@@ -259,9 +271,14 @@ function Workspace({ user, onLogout }: Props) {
     await run(async () => {
       if (supabase) {
         const response = productEditing
-          ? await supabase.from('catalog_products').update(item).eq('id', productEditing.id).select('*').single()
-          : await supabase.from('catalog_products').insert({ ...item, owner_id: user.id }).select('*').single()
-        if (response.error) throw response.error
+          ? await supabase.from('posters').update(item).eq('id', productEditing.id).select(PRODUCT_API_COLUMNS).single()
+          : await supabase.from('posters').insert({ ...item, owner_id: user.id, template_id: null }).select(PRODUCT_API_COLUMNS).single()
+        if (response.error) {
+          if (response.error.code === '23502' && response.error.message.includes('template_id')) {
+            throw new Error('Execute a migração 005 no SQL Editor: ela permite cadastrar produtos sem vincular a modelos.')
+          }
+          throw response.error
+        }
         await refresh()
       } else {
         const updated: CatalogProduct = { ...item, id: productEditing?.id || id(), owner_id: productEditing?.owner_id || user.id,
@@ -276,7 +293,7 @@ function Workspace({ user, onLogout }: Props) {
     if (!window.confirm(`Excluir “${product.product_name}” da biblioteca? Itens já adicionados à montagem atual não serão removidos.`)) return
     await run(async () => {
       if (supabase) {
-        const { error } = await supabase.from('catalog_products').delete().eq('id', product.id)
+        const { error } = await supabase.from('posters').delete().eq('id', product.id)
         if (error) throw error
         await refresh()
       } else setProducts(prev => prev.filter(p => p.id !== product.id))
@@ -295,12 +312,17 @@ function Workspace({ user, onLogout }: Props) {
     if (!unique.length) { notify('Todos os itens já estão cadastrados. Nada foi duplicado.', true); setBatchOpen(false); return }
     await run(async () => {
       if (supabase) {
-        // O conflito é ignorado no banco para evitar duplicações por importações simultâneas.
-        const { error } = await supabase.from('catalog_products').upsert(
-          unique.map(item => ({ ...item, owner_id: user.id })),
-          { onConflict: 'catalog_key', ignoreDuplicates: true }
+        // A importação usa somente as colunas antigas e reconhecidas pela API.
+        // Não usa font_id nem catalog_key, que causavam erros de cache.
+        const { error } = await supabase.from('posters').insert(
+          unique.map(item => ({ ...item, owner_id: user.id, template_id: null }))
         )
-        if (error) throw error
+        if (error) {
+          if (error.code === '23502' && error.message.includes('template_id')) {
+            throw new Error('Execute a migração 005 no SQL Editor antes de importar produtos.')
+          }
+          throw error
+        }
         await refresh()
       } else setProducts(prev => [...unique.map(item => ({ ...item, id: id(), owner_id: user.id, created_at: NOW(), updated_at: NOW() })), ...prev])
       setBatchOpen(false); setBatchRows(null); setBatchFilename(''); setBatchText('')

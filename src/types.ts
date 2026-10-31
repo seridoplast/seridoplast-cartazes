@@ -26,7 +26,7 @@ export type PosterTemplate = {
   created_at: string
   updated_at?: string
 }
-/** Apenas item da montagem atual; NÃO há gravação na tabela antiga posters. */
+/** Item temporário de impressão: a montagem não persiste na base. */
 export type Poster = {
   id: string
   template_id: string
@@ -39,7 +39,7 @@ export type Poster = {
   created_at: string
   updated_at: string
 }
-/** Registro persistente, independente de qualquer arte ou modelo. */
+/** Produto persistente, armazenado na tabela posters com template_id = NULL na versão compatível. */
 export type CatalogProduct = {
   id: string
   product_name: string

@@ -1,3 +1,5 @@
+> **ATUALIZAÇÃO v2.0.1:** Para projetos com `PGRST205` em `catalog_products`, execute `supabase/migrations/005_modo_compativel_posters.sql` e leia `LEIA-PRIMEIRO-V2.0.1.txt`. O catálogo v2.0.1 usa a tabela antiga `posters`, com `template_id = NULL`, sem vincular produtos a modelos. Não execute a migração 004 novamente.
+
 # Seridóplast Cartazes v2.0
 
 **Se já utiliza a versão 1.2.1:** siga `LEIA-PRIMEIRO-V2.txt` e execute somente a migração `supabase/migrations/004_biblioteca_produtos.sql`. Não execute `setup.sql` novamente.

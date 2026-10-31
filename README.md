@@ -201,3 +201,12 @@ Nesta entrega foi possível verificar a sintaxe do código atualizado, examinar 
 ## Correção v1.2 (PGRST204)
 
 Para bancos criados antes da fonte por cartaz, execute `supabase/migrations/003_corrigir_posters_font_id.sql` no SQL Editor do projeto. A migração adiciona `public.posters.font_id` caso falte e recarrega o cache de esquema do PostgREST. Depois publique novamente e force a atualização do navegador. A marca horizontal não exibe mais o símbolo; ele permanece no favicon.
+
+
+## Atualização v2.0.3 — Cartaz adaptativo
+
+- Quando o produto **não tem preço DE**, não aparece o texto “Por:” e o espaço entre nome, preço e unidade é reduzido automaticamente. A posição do modelo original permanece salva sem alterações.
+- Quando **Mostrar R$** está ativo, o símbolo é menor, abaixo do “Por:” e à esquerda dos algarismos grandes.
+- Quando **Mostrar R$** está desligado, o “Por:” mantém sua posição independente, como antes, desde que exista um preço DE.
+- Em **Modelos → Editar → Prévia**, marque **Simular cartaz sem preço DE** para comparar os dois layouts.
+- Não há migração SQL para esta atualização.

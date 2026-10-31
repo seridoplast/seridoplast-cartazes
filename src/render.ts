@@ -100,6 +100,37 @@ export function elementZones(template: PosterTemplate): Record<PosterElement, Zo
   return { ...defaultElementZones(template.zone), ...(template.style?.elements || {}) }
 }
 
+/**
+ * Cartazes sem preço DE usam o mesmo posicionamento base salvo no modelo,
+ * porém fecham automaticamente o espaço entre título, preço e unidade.
+ * Nenhuma alteração de zona é persistida no banco.
+ */
+export function effectiveElementZones(template: PosterTemplate, poster: Pick<Poster, 'price_from'>): Record<PosterElement, Zone> {
+  const zones = elementZones(template)
+  if (poster.price_from !== null) return zones
+
+  const { title, price, unit } = zones
+  const gap = price.y - (title.y + title.h)
+  const preferredGap = template.zone.h * .035
+  const toClose = Math.max(0, gap - preferredGap)
+  if (!toClose) return zones
+
+  // Uma parte do espaço é absorvida movendo o título para baixo;
+  // o restante move o preço (e a unidade) para cima.
+  const moveTitle = toClose * .23
+  const movePrice = toClose - moveTitle
+  const newPriceY = Math.max(0, price.y - movePrice)
+  const appliedPriceMove = price.y - newPriceY
+  return {
+    ...zones,
+    title: { ...title, y: Math.min(1 - title.h, title.y + moveTitle) },
+    price: { ...price, y: newPriceY },
+    unit: unit.y >= price.y
+      ? { ...unit, y: Math.max(0, unit.y - appliedPriceMove) }
+      : unit
+  }
+}
+
 export async function paintPoster(
   canvas: HTMLCanvasElement, template: PosterTemplate, poster: Poster, imageURL: string,
   fontFamily = 'Arial', width = 900
@@ -114,7 +145,7 @@ export async function paintPoster(
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height)
   ctx.drawImage(image, 0, 0, width, height)
   const style: PosterStyle = { ...INITIAL_STYLE, ...template.style }
-  const parts = elementZones(template)
+  const parts = effectiveElementZones(template, poster)
   const box = (key: PosterElement) => {
     const z = parts[key]
     return { x: z.x * width, y: z.y * height, w: z.w * width, h: z.h * height }
@@ -146,23 +177,86 @@ export async function paintPoster(
     ctx.moveTo(startNumber, baselineY); ctx.lineTo(startNumber + numberWidth, baselineY); ctx.stroke()
   }
 
-  const por = box('por')
-  drawFitText(ctx, 'Por:', por.x + por.w / 2, por.y, por.w, por.h,
-    width * .052, fontFamily, style.titleColor, 1, width * .018)
-
   const price = box('price')
+  const por = box('por')
   const number = money(poster.price_to)
-  const currency = style.showCurrency ? 'R$ ' : ''
-  const priceText = `${currency}${number}`
+  const hasOldPrice = poster.price_from !== null
+  const showCurrency = style.showCurrency
+  // O preço grande ocupa a mesma área com ou sem o prefixo R$.
+  // Com R$, o prefixo tem tamanho reduzido e fica junto da base dos números.
   let priceSize = Math.min(width * style.priceScale, price.h * .92)
-  ctx.textBaseline = 'top'; ctx.textAlign = 'center'; ctx.fillStyle = style.priceColor
-  while (priceSize > width * .065) {
-    ctx.font = `800 ${priceSize}px "${fontFamily}", Arial, sans-serif`
-    if (ctx.measureText(priceText).width <= price.w * .98) break
-    priceSize -= 2
+  const minPriceSize = width * .04
+  const rightEdge = price.x + price.w * .985
+  const leftEdge = price.x + price.w * .015
+  const gapFor = (size: number) => Math.max(3, size * .045)
+  const currencySizeFor = (size: number) => Math.max(width * .015, size * .34)
+  const setFont = (size: number) => { ctx.font = `800 ${size}px "${fontFamily}", Arial, sans-serif` }
+  const textWidth = (text: string, size: number) => { setFont(size); return ctx.measureText(text).width }
+
+  let currencyX = 0
+  let numberX = 0
+  // Mantém o "Por:" independente e na posição ajustada pelo usuário,
+  // usando seu centro como referência para a coluna compacta R$ / Por.
+  const porCenterX = por.x + por.w / 2
+  for (; priceSize > minPriceSize; priceSize -= 2) {
+    const numberWidth = textWidth(number, priceSize)
+    if (!showCurrency) {
+      if (numberWidth <= price.w * .97) break
+      continue
+    }
+    const currencySize = currencySizeFor(priceSize)
+    const currencyWidth = textWidth('R$', currencySize)
+    const gapX = gapFor(priceSize)
+    if (hasOldPrice) {
+      currencyX = Math.max(leftEdge + currencyWidth / 2, porCenterX)
+      numberX = currencyX + currencyWidth / 2 + gapX
+    } else {
+      const groupWidth = currencyWidth + gapX + numberWidth
+      currencyX = leftEdge + Math.max(0, (rightEdge - leftEdge - groupWidth) / 2) + currencyWidth / 2
+      numberX = currencyX + currencyWidth / 2 + gapX
+    }
+    if (numberX + numberWidth <= rightEdge) break
   }
-  ctx.font = `800 ${priceSize}px "${fontFamily}", Arial, sans-serif`
-  ctx.fillText(priceText, price.x + price.w / 2, price.y + Math.max(0, (price.h - priceSize) / 2), price.w)
+  priceSize = Math.max(minPriceSize, priceSize)
+  const priceTop = price.y + Math.max(0, (price.h - priceSize) / 2)
+  ctx.fillStyle = style.priceColor
+  ctx.textBaseline = 'top'
+  if (showCurrency) {
+    // Recalcula usando o tamanho final, inclusive caso a largura seja muito pequena.
+    const currencySize = currencySizeFor(priceSize)
+    const currencyWidth = textWidth('R$', currencySize)
+    const numberWidth = textWidth(number, priceSize)
+    const gapX = gapFor(priceSize)
+    if (hasOldPrice) {
+      currencyX = Math.max(leftEdge + currencyWidth / 2, porCenterX)
+      numberX = currencyX + currencyWidth / 2 + gapX
+    } else {
+      const groupWidth = currencyWidth + gapX + numberWidth
+      currencyX = leftEdge + Math.max(0, (rightEdge - leftEdge - groupWidth) / 2) + currencyWidth / 2
+      numberX = currencyX + currencyWidth / 2 + gapX
+    }
+    // O 'R$' fica menor e mais baixo, alinhado à base do preço principal.
+    setFont(currencySize)
+    ctx.textAlign = 'center'
+    ctx.fillText('R$', currencyX, priceTop + priceSize * .60)
+    setFont(priceSize)
+    ctx.textAlign = 'left'
+    ctx.fillText(number, numberX, priceTop, Math.max(1, rightEdge - numberX))
+    if (hasOldPrice) {
+      // Quando existe R$, 'Por:' fica logo acima dele.
+      drawFitText(ctx, 'Por:', currencyX, por.y, Math.max(por.w, currencyWidth * 1.2), por.h,
+        width * .052, fontFamily, style.titleColor, 1, width * .018)
+    }
+  } else {
+    // Sem R$, o 'Por:' continua na posição original (se houver preço DE).
+    setFont(priceSize)
+    ctx.textAlign = 'center'
+    ctx.fillText(number, price.x + price.w / 2, priceTop, price.w)
+    if (hasOldPrice) {
+      drawFitText(ctx, 'Por:', porCenterX, por.y, por.w, por.h,
+        width * .052, fontFamily, style.titleColor, 1, width * .018)
+    }
+  }
 
   const unit = box('unit')
   drawFitText(ctx, poster.unit_label.toLocaleUpperCase('pt-BR'), unit.x + unit.w / 2, unit.y,

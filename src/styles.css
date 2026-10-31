@@ -92,3 +92,7 @@
 .model-stage-content>.elements-stage{max-width:470px;flex:none}
 :root[data-theme='dark'] .brand-logo--dark,.brand-logo.on-red .brand-logo--dark{background:transparent;padding:0;border-radius:0}
 .catalog-list-info{font-size:10px;color:var(--muted);padding:0 14px;line-height:1.45}
+
+/* v2.0.3 — prévia interativa para validar cartazes sem preço DE. */
+.preview-no-de{display:inline-flex;align-items:center;gap:9px;justify-content:center;margin:4px auto 14px;font-size:12px;font-weight:700;color:var(--text);cursor:pointer;background:var(--hover);border:1px solid var(--line);border-radius:9px;padding:9px 12px;}
+.preview-no-de input{margin:0;}

@@ -34,6 +34,7 @@ export type Poster = {
   price_from: number | null
   price_to: number
   unit_label: string
+  is_weight_based: boolean
   font_id: string | null
   owner_id: string
   created_at: string
@@ -46,12 +47,13 @@ export type CatalogProduct = {
   price_from: number | null
   price_to: number
   unit_label: string
+  is_weight_based: boolean
   owner_id: string
   created_at: string
   updated_at: string
 }
 export type PrintItem = Poster & { product_id: string | null }
-export type ProductInput = Pick<CatalogProduct, 'product_name' | 'price_from' | 'price_to' | 'unit_label'>
+export type ProductInput = Pick<CatalogProduct, 'product_name' | 'price_from' | 'price_to' | 'unit_label' | 'is_weight_based'>
 export type FontAsset = {
   id: string
   name: string
@@ -77,7 +79,7 @@ export const INITIAL_STYLE: PosterStyle = {
 export const EXAMPLE_POSTER: Poster = {
   id: 'demo-poster', template_id: 'demo-template',
   product_name: 'CRISTALCOPO COPO PS TRANSP 150ML 100UN',
-  price_from: 99.9, price_to: 78.75, unit_label: 'CX C/ 25PC X 100UND', font_id: null,
+  price_from: 99.9, price_to: 78.75, unit_label: 'CX C/ 25PC X 100UND', is_weight_based: false, font_id: null,
   owner_id: 'demo', created_at: new Date().toISOString(), updated_at: new Date().toISOString()
 }
 export const EXAMPLE_TEMPLATE: PosterTemplate = {

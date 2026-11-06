@@ -25,6 +25,7 @@ create table if not exists public.posters (
   price_from numeric(12,2) check (price_from >= 0),
   price_to numeric(12,2) not null check (price_to >= 0),
   unit_label text not null default '' check (char_length(unit_label) <= 180),
+  is_weight_based boolean not null default false,
   owner_id uuid not null default auth.uid() references auth.users(id),
   updated_by uuid references auth.users(id),
   created_at timestamptz not null default now(),

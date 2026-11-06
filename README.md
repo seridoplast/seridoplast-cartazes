@@ -215,3 +215,14 @@ Para bancos criados antes da fonte por cartaz, execute `supabase/migrations/003_
 ## Ajuste v2.0.6 — título de uma linha
 
 Quando o nome do produto cabe em uma só linha, o renderizador aproxima visualmente o título e o conjunto de preço/unidade, sem alterar as posições salvas no modelo. Cartazes com nomes de duas ou mais linhas mantêm o layout anterior. A regra vale para a prévia e a exportação PDF; não requer migração SQL.
+
+
+## Atualização v2.0.7 — preço por peso (KG)
+
+**Antes do deploy:** no Supabase > SQL Editor, execute `supabase/migrations/006_preco_por_kg.sql` e aguarde a atualização do esquema. A migração adiciona a coluna `is_weight_based` com padrão `false`, sem alterar os cadastros já existentes.
+
+- Em **Produtos > Novo produto** ou **Montar cartazes > Cadastrar produto**, marque **Preço por peso (KG)** se o valor informado for por quilo. Deixe desmarcado para preços por unidade.
+- Ao adicionar o produto na montagem, a marcação é automaticamente copiada, e o cartaz renderiza **KG** à direita do valor; o conjunto **R$ + preço + KG** é medido e centralizado dentro da zona do preço. O mesmo resultado aparece na prévia e na exportação PDF.
+- Na montagem, é possível mudar a opção de um cartaz específico sem alterar a biblioteca. O ajuste usa a configuração **Mostrar R$** do modelo como antes.
+- Importação por Excel, CSV ou colagem: colunas **A Produto | B De | C Por | D Unidade | E Peso (KG)**. A coluna E é opcional: `SIM` para preço por quilo, `NÃO` ou vazia para preço por unidade. Os arquivos antigos com quatro colunas continuam aceitos.
+- A listagem mostra `R$ 14,49 / KG` nos produtos marcados; o marcador de peso é um dado próprio do produto, não parte da descrição de apresentação.

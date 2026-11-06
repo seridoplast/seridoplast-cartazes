@@ -243,6 +243,7 @@ export async function paintPoster(
   const number = money(poster.price_to)
   const hasOldPrice = poster.price_from !== null
   const showCurrency = style.showCurrency
+  const isWeight = poster.is_weight_based === true
   // O preço grande ocupa a mesma área com ou sem o prefixo R$.
   // Com R$, o prefixo tem tamanho reduzido e fica junto da base dos números.
   let priceSize = Math.min(width * style.priceScale, price.h * .92)
@@ -250,6 +251,7 @@ export async function paintPoster(
   const rightEdge = price.x + price.w * .985
   const gapFor = (size: number) => Math.max(3, size * .045)
   const currencySizeFor = (size: number) => Math.max(width * .015, size * .34)
+  const weightSizeFor = (size: number) => Math.max(width * .015, size * .32)
   const setFont = (size: number) => { ctx.font = `800 ${size}px "${fontFamily}", Arial, sans-serif` }
   const textWidth = (text: string, size: number) => { setFont(size); return ctx.measureText(text).width }
 
@@ -270,7 +272,26 @@ export async function paintPoster(
       groupWidth
     }
   }
+  // Mede o bloco inteiro antes de renderizar. Assim o preço não perde o
+  // alinhamento ao acrescentar KG no canto direito, inclusive no PDF.
+  const weightedPriceGroup = (size: number) => {
+    const currencyWidth = showCurrency ? textWidth('R$', currencySizeFor(size)) : 0
+    const numberWidth = textWidth(number, size)
+    const weightWidth = textWidth('KG', weightSizeFor(size))
+    const beforeNumber = showCurrency ? gapFor(size) : 0
+    const afterNumber = gapFor(size)
+    const fullWidth = currencyWidth + beforeNumber + numberWidth + afterNumber + weightWidth
+    const groupStart = price.x + (price.w - fullWidth) / 2
+    return { currencyWidth, numberWidth, weightWidth, beforeNumber, afterNumber, fullWidth, groupStart,
+      currencyX: groupStart + currencyWidth / 2,
+      numberX: groupStart + currencyWidth + beforeNumber,
+      weightX: groupStart + currencyWidth + beforeNumber + numberWidth + afterNumber }
+  }
   for (; priceSize > minPriceSize; priceSize -= 2) {
+    if (isWeight) {
+      if (weightedPriceGroup(priceSize).fullWidth <= price.w * .97) break
+      continue
+    }
     const numberWidth = textWidth(number, priceSize)
     if (!showCurrency) {
       if (numberWidth <= price.w * .97) break
@@ -283,7 +304,31 @@ export async function paintPoster(
   const priceTop = price.y + Math.max(0, (price.h - priceSize) / 2)
   ctx.fillStyle = style.priceColor
   ctx.textBaseline = 'top'
-  if (showCurrency) {
+  if (isWeight) {
+    // R$ e KG menores na mesma linha de base visual dos algarismos.
+    const group = weightedPriceGroup(priceSize)
+    if (showCurrency) {
+      setFont(currencySizeFor(priceSize))
+      ctx.textAlign = 'center'
+      ctx.fillText('R$', group.currencyX, priceTop + priceSize * .53)
+    }
+    setFont(priceSize)
+    ctx.textAlign = 'left'
+    ctx.fillText(number, group.numberX, priceTop, Math.max(1, price.x + price.w - group.numberX))
+    setFont(weightSizeFor(priceSize))
+    ctx.textAlign = 'left'
+    ctx.fillText('KG', group.weightX, priceTop + priceSize * .55)
+    if (hasOldPrice) {
+      if (showCurrency) {
+        drawFitText(ctx, 'Por:', group.currencyX, por.y,
+          Math.max(por.w, group.currencyWidth * 1.2), por.h,
+          width * .052, fontFamily, style.titleColor, 1, width * .018)
+      } else {
+        drawFitText(ctx, 'Por:', porCenterX, por.y, por.w, por.h,
+          width * .052, fontFamily, style.titleColor, 1, width * .018)
+      }
+    }
+  } else if (showCurrency) {
     // Recalcula usando o tamanho final, inclusive caso a largura seja muito pequena.
     const currencySize = currencySizeFor(priceSize)
     const currencyWidth = textWidth('R$', currencySize)

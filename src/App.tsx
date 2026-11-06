@@ -15,6 +15,7 @@ import { ZoneEditor } from './components/ZoneEditor'
 import { ElementsEditor } from './components/ElementsEditor'
 import { BrandLogo } from './components/BrandLogo'
 import { importExcel } from './excel'
+import { parseWeightFlag } from './weight'
 import {
   EXAMPLE_POSTER, EXAMPLE_TEMPLATE, INITIAL_STYLE, INITIAL_ZONE,
   type CatalogProduct, type FontAsset, type PrintItem, type Poster, type ProductInput,
@@ -25,7 +26,7 @@ type Page = 'dashboard' | 'posters' | 'products' | 'templates' | 'fonts' | 'tuto
 type ExportLayout = 'single' | 'double'
 // Modo compatível com o cache atual do PostgREST: a tabela posters já é reconhecida
 // pela API. Os NOVOS produtos têm template_id = NULL (independentes dos modelos).
-const PRODUCT_API_COLUMNS = 'id,product_name,price_from,price_to,unit_label,owner_id,created_at,updated_at'
+const PRODUCT_API_COLUMNS = 'id,product_name,price_from,price_to,unit_label,is_weight_based,owner_id,created_at,updated_at'
 const NOW = () => new Date().toISOString()
 const id = () => crypto.randomUUID()
 const DEMO_USER = { id: 'demo', email: 'demonstração@seridoplast.com.br' }
@@ -34,35 +35,35 @@ function normalizeTemplate(row: PosterTemplate): PosterTemplate {
   return { ...row, zone: { ...INITIAL_ZONE, ...row.zone }, style: { ...INITIAL_STYLE, ...row.style } }
 }
 function normalizeProduct(row: CatalogProduct): CatalogProduct {
-  return { ...row, price_from: numeric(row.price_from), price_to: Number(row.price_to) }
+  return { ...row, price_from: numeric(row.price_from), price_to: Number(row.price_to), is_weight_based: row.is_weight_based === true }
 }
 function cleanProduct(input: ProductInput): ProductInput {
   return { product_name: input.product_name.trim(), unit_label: input.unit_label.trim(),
-    price_from: input.price_from, price_to: input.price_to }
+    price_from: input.price_from, price_to: input.price_to, is_weight_based: input.is_weight_based === true }
 }
 function productKey(product: ProductInput) {
   return `${product.product_name.trim().toLocaleLowerCase('pt-BR')}|${product.unit_label.trim().toLocaleLowerCase('pt-BR')}`
 }
-function blankProduct(): ProductInput { return { product_name: '', price_from: null, price_to: 0, unit_label: '' } }
+function blankProduct(): ProductInput { return { product_name: '', price_from: null, price_to: 0, unit_label: '', is_weight_based: false } }
 function parseBulk(text: string): ProductInput[] {
   const result: ProductInput[] = []
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
   for (const line of lines) {
     const pieces = line.includes('\t') ? line.split('\t') : line.split(';')
-    const [name = '', oldValue = '', newValue = '', unit = ''] = pieces.map(s => s.trim().replace(/^\uFEFF/, '').replace(/^"|"$/g, ''))
+    const [name = '', oldValue = '', newValue = '', unit = '', weight = ''] = pieces.map(s => s.trim().replace(/^\uFEFF/, '').replace(/^"|"$/g, ''))
     if (/^(produto|descri[cç][aã]o|nome)/i.test(name)) continue
     const value = parseMoney(newValue), old = parseMoney(oldValue)
     if (!name || value === null || value <= 0) throw new Error(`Linha inválida: “${line.slice(0, 90)}”. Use Produto | De | Por | Unidade.`)
     if (oldValue && old === null) throw new Error(`Preço DE inválido em “${name}”.`)
     if (name.length > 350 || unit.length > 180) throw new Error(`Produto ou apresentação muito longa em “${name.slice(0, 45)}”.`)
-    result.push({ product_name: name, price_from: old, price_to: value, unit_label: unit })
+    result.push({ product_name: name, price_from: old, price_to: value, unit_label: unit, is_weight_based: parseWeightFlag(weight) })
   }
   if (!result.length) throw new Error('Cole pelo menos um produto com preço de venda.')
   if (result.length > 200) throw new Error('Importe no máximo 200 produtos de cada vez.')
   return result
 }
 function downloadCsvSample() {
-  const text = '\uFEFFProduto;De;Por;Unidade\nCRISTALCOPO COPO PS 150ML 100UN;99,90;78,75;CX C/ 25PC X 100UND\nSACOLA NEWPLAST M;39,90;34,50;FARDO C/ 1.000 UN\n'
+  const text = '\uFEFFProduto;De;Por;Unidade;Peso (KG)\nCRISTALCOPO COPO PS 150ML 100UN;99,90;78,75;CX C/ 25PC X 100UND;NÃO\nSOUZAPEL BOBINA ABC SACO PICOT;20,90;14,49;40X60 | 20X30 | 25X35 | 30X40 | 35X50;SIM\n'
   const blob = new Blob([text], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'exemplo-cartazes.csv'; anchor.click()
@@ -120,7 +121,7 @@ function Workspace({ user, onLogout }: Props) {
   const [products, setProducts] = useState<CatalogProduct[]>(isConfigured ? [] : [{
     ...blankProduct(), id: 'demo-product', owner_id: 'demo', created_at: NOW(), updated_at: NOW(),
     product_name: EXAMPLE_POSTER.product_name, price_from: EXAMPLE_POSTER.price_from,
-    price_to: EXAMPLE_POSTER.price_to, unit_label: EXAMPLE_POSTER.unit_label
+    price_to: EXAMPLE_POSTER.price_to, unit_label: EXAMPLE_POSTER.unit_label, is_weight_based: EXAMPLE_POSTER.is_weight_based
   }])
   const [fonts, setFonts] = useState<FontAsset[]>([])
   const [imageUrls, setImageUrls] = useState<Record<string, string>>(isConfigured ? {} : { [EXAMPLE_TEMPLATE.id]: DEMO_IMAGE_URL })
@@ -134,7 +135,7 @@ function Workspace({ user, onLogout }: Props) {
       const raw = sessionStorage.getItem(sessionKey)
       const items = raw ? JSON.parse(raw) : []
       if (!Array.isArray(items)) return []
-      return items.filter(item => item && typeof item.id === 'string' && typeof item.product_name === 'string' && typeof item.template_id === 'string')
+      return items.filter(item => item && typeof item.id === 'string' && typeof item.product_name === 'string' && typeof item.template_id === 'string').map(item => ({ ...item, is_weight_based: item.is_weight_based === true }))
     } catch { return [] }
   })
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(sessionItems[0]?.id ?? null)
@@ -185,7 +186,7 @@ function Workspace({ user, onLogout }: Props) {
       setTemplates(resultTemplates); setFonts(resultFonts); setImageUrls(Object.fromEntries(entries))
       setSelectedTemplateId(prev => resultTemplates.some(t => t.id === prev) ? prev : (resultTemplates[0]?.id || ''))
       if (c.error) {
-        setCatalogError('Não foi possível ler os produtos pela API. Confira se a tabela public.posters continua acessível no Supabase. Erro: ' + cleanError(c.error))
+        setCatalogError(c.error.message.includes('is_weight_based') ? 'Antes de usar a opção Peso (KG), execute a migração 006_preco_por_kg.sql no SQL Editor do Supabase e atualize a página.' : 'Não foi possível ler os produtos pela API. Confira se a tabela public.posters continua acessível no Supabase. Erro: ' + cleanError(c.error))
         console.error('Erro no catálogo:', c.error)
       } else {
         setCatalogError('')
@@ -237,7 +238,7 @@ function Workspace({ user, onLogout }: Props) {
   }
   function openProduct(product: CatalogProduct | null = null) {
     setProductEditing(product); setProductForm(product ? {
-      product_name: product.product_name, price_from: product.price_from, price_to: product.price_to, unit_label: product.unit_label
+      product_name: product.product_name, price_from: product.price_from, price_to: product.price_to, unit_label: product.unit_label, is_weight_based: product.is_weight_based
     } : blankProduct())
     setPage('products'); setMobileNav(false)
   }
@@ -247,7 +248,7 @@ function Workspace({ user, onLogout }: Props) {
   }
   function addProduct(product: CatalogProduct) {
     if (!templates.length) { notify('Cadastre um modelo primeiro.', true); setPage('templates'); return }
-    const item: PrintItem = { ...product, id: id(), product_id: product.id,
+    const item: PrintItem = { ...product, is_weight_based: product.is_weight_based === true, id: id(), product_id: product.id,
       template_id: selectedTemplateId || templates[0].id, font_id: null, updated_at: NOW(), created_at: NOW() }
     setSessionItems(prev => [...prev, item]); setSelectedSessionId(item.id)
     setPage('posters'); notify('Produto adicionado à montagem.')
@@ -282,6 +283,9 @@ function Workspace({ user, onLogout }: Props) {
         ? await supabase.from('posters').update(item).eq('id', editing.id).select(PRODUCT_API_COLUMNS).single()
         : await supabase.from('posters').insert({ ...item, owner_id: user.id, template_id: null }).select(PRODUCT_API_COLUMNS).single()
       if (response.error) {
+        if (response.error.message.includes('is_weight_based')) {
+          throw new Error('Execute a migração 006_preco_por_kg.sql no Supabase antes de salvar produtos por peso.')
+        }
         if (response.error.code === '23502' && response.error.message.includes('template_id')) {
           throw new Error('O projeto Supabase conectado ainda exige template_id. Confira a migração 005 nesse projeto.')
         }
@@ -335,12 +339,14 @@ function Workspace({ user, onLogout }: Props) {
     if (!unique.length) { notify('Todos os itens já estão cadastrados. Nada foi duplicado.', true); setBatchOpen(false); return }
     await run(async () => {
       if (supabase) {
-        // A importação usa somente as colunas antigas e reconhecidas pela API.
-        // Não usa font_id nem catalog_key, que causavam erros de cache.
+        // A coluna is_weight_based registra se o preço é por quilo; não depende do modelo.
         const { error } = await supabase.from('posters').insert(
           unique.map(item => ({ ...item, owner_id: user.id, template_id: null }))
         )
         if (error) {
+          if (error.message.includes('is_weight_based')) {
+            throw new Error('Execute a migração 006_preco_por_kg.sql no Supabase antes da importação.')
+          }
           if (error.code === '23502' && error.message.includes('template_id')) {
             throw new Error('Execute a migração 005 no SQL Editor antes de importar produtos.')
           }
@@ -507,13 +513,13 @@ function Workspace({ user, onLogout }: Props) {
             <button className="btn btn-primary" disabled={working || !sessionItems.length} onClick={() => void doExport(sessionItems)}><FileDown size={17}/>{working && exportProgress ? exportProgress : 'Exportar e finalizar'}</button></div></div>
         <div className="session-strip"><div className="session-strip-heading"><strong>Cartazes desta impressão</strong><span>{sessionItems.length ? 'Clique em um item para ajustar somente esta impressão.' : 'Adicione produtos da biblioteca abaixo.'}</span></div>
           <div className="session-items">{sessionItems.length ? sessionItems.map(item => <div className={`session-chip ${selectedSessionId === item.id ? 'active' : ''}`} key={item.id}>
-            <button onClick={() => setSelectedSessionId(item.id)} title="Editar este cartaz"><strong>{item.product_name}</strong><small>R$ {money(item.price_to)}</small></button>
+            <button onClick={() => setSelectedSessionId(item.id)} title="Editar este cartaz"><strong>{item.product_name}</strong><small>R$ {money(item.price_to)}{item.is_weight_based ? ' / KG' : ''}</small></button>
             <button className="session-chip-remove" onClick={() => removeItem(item.id)} aria-label={`Remover ${item.product_name} desta montagem`} title="Remover da montagem"><X size={15}/></button>
           </div>) : <div className="session-empty">Nenhum cartaz nesta montagem. A arte do modelo começa em branco.</div>}</div></div>
         <div className="work-grid"><section className="poster-list panel"><div className="panel-title"><h3>Biblioteca de produtos <span className="count-chip">{filtered.length}</span></h3></div><div className="search-box"><Search size={18}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar produtos cadastrados..."/></div>
           <div className="quick-add-row"><button className="btn btn-outline full" onClick={openQuickProduct} disabled={working || !!catalogError}><Plus size={17}/> Adicionar produto à biblioteca</button></div>
           {filtered.length > 250 && <p className="catalog-list-info">Exibindo 250 de {filtered.length} itens. Pesquise para encontrar os demais.</p>}<div className="list-scroll">{filtered.length ? filtered.slice(0, 250).map(product => <div className="poster-row" key={product.id}>
-            <button className="poster-row-body" onClick={() => addProduct(product)} title="Adicionar à montagem"><strong>{product.product_name}</strong><span>{product.unit_label || 'Unidade não informada'}</span><div><b>R$ {money(product.price_to)}</b> {product.price_from !== null && <del>R$ {money(product.price_from)}</del>}</div></button>
+            <button className="poster-row-body" onClick={() => addProduct(product)} title="Adicionar à montagem"><strong>{product.product_name}</strong><span>{product.unit_label || 'Unidade não informada'}</span><div><b>R$ {money(product.price_to)}{product.is_weight_based ? ' / KG' : ''}</b> {product.price_from !== null && <del>R$ {money(product.price_from)}</del>}</div></button>
             <button className="icon-button add-list-item" onClick={() => addProduct(product)} title="Adicionar ao cartaz" aria-label={`Adicionar ${product.product_name}`}><Plus size={18}/></button></div>) : <div className="empty-list"><FolderOpen size={28}/><strong>Nenhum produto encontrado</strong><p>Cadastre ou importe produtos no catálogo.</p></div>}</div>
           <div className="panel-bottom"><button className="link-action" onClick={openBatch}><CopyPlus size={17}/> Importar vários produtos</button></div></section>
           <section className="preview-panel panel"><div className="panel-title"><div><h3>Pré-visualização</h3><span>{activeSession ? 'Cartaz em edição (temporário)' : 'Modelo vazio, pronto para uso'}</span></div><span className="preview-tag">A4 · 210×297 mm</span></div>
@@ -528,6 +534,7 @@ function Workspace({ user, onLogout }: Props) {
               <div className="divider-label"><span>Valores desta impressão</span></div><div className="price-fields"><label>DE (opcional)<span className="input-prefix">R$</span><CurrencyInput value={activeSession.price_from} onChange={value => updateItem({ price_from: value })} placeholder="99,90"/></label>
                 <label>POR<span className="input-prefix">R$</span><CurrencyInput value={activeSession.price_to} onChange={value => updateItem({ price_to: value ?? 0 })} placeholder="78,75"/></label></div>
               <label>Apresentação<input maxLength={180} value={activeSession.unit_label} onChange={e => updateItem({ unit_label: e.target.value })}/></label>
+              <label className="weight-toggle"><input type="checkbox" checked={activeSession.is_weight_based === true} onChange={e => updateItem({ is_weight_based: e.target.checked })}/><span><strong>Preço por peso (KG)</strong><small>Exibir KG ao lado do valor neste cartaz</small></span></label>
               <div className="session-edit-note"><ShieldCheck size={17}/> As alterações acima não mudam o preço da biblioteca. Para atualizar o cadastro, abra Produtos.</div>
               <button className="btn btn-outline full" onClick={() => { const copy = { ...activeSession, id: id() }; setSessionItems(prev => [...prev, copy]); setSelectedSessionId(copy.id) }}><CopyPlus size={17}/> Duplicar nesta montagem</button>
               <button className="danger-link" onClick={() => removeItem(activeSession.id)}><Trash2 size={16}/> Remover desta montagem</button>
@@ -538,7 +545,7 @@ function Workspace({ user, onLogout }: Props) {
         <div className="page-heading"><div><div className="eyebrow muted">CATÁLOGO COMPARTILHADO</div><h1>Biblioteca de produtos</h1><p>Produtos ficam salvos aqui e podem ser usados em qualquer modelo, quantas vezes quiser.</p></div><div className="page-buttons"><button className="btn btn-subtle" onClick={openBatch}><FileSpreadsheet size={17}/> Importar Excel</button><button className="btn btn-primary" onClick={() => openProduct()}><Plus size={18}/> Novo produto</button></div></div>
         <div className="products-grid"><section className="panel poster-list"><div className="panel-title"><h3>Produtos cadastrados <span className="count-chip">{catalogFiltered.length}</span></h3></div><div className="search-box"><Search size={18}/><input value={librarySearch} onChange={e => setLibrarySearch(e.target.value)} placeholder="Pesquisar nome ou apresentação..."/></div>
           {catalogFiltered.length > 250 && <p className="catalog-list-info">Exibindo 250 de {catalogFiltered.length} itens. Refine a busca.</p>}<div className="list-scroll">{catalogFiltered.slice(0, 250).map(product => <div className={`poster-row ${productEditing?.id === product.id ? 'selected' : ''}`} key={product.id}>
-            <button className="poster-row-body" onClick={() => openProduct(product)}><strong>{product.product_name}</strong><span>{product.unit_label}</span><div><b>R$ {money(product.price_to)}</b>{product.price_from !== null && <del>R$ {money(product.price_from)}</del>}</div></button>
+            <button className="poster-row-body" onClick={() => openProduct(product)}><strong>{product.product_name}</strong><span>{product.unit_label}</span><div><b>R$ {money(product.price_to)}{product.is_weight_based ? ' / KG' : ''}</b>{product.price_from !== null && <del>R$ {money(product.price_from)}</del>}</div></button>
             <button className="icon-button add-list-item" title="Adicionar à montagem" onClick={() => addProduct(product)}><Plus size={18}/></button></div>)}
             {!catalogFiltered.length && <div className="empty-list"><FolderOpen size={28}/><strong>Biblioteca vazia</strong><p>Cadastre o primeiro produto ou importe o Excel.</p></div>}</div></section>
           <section className="panel"><div className="panel-title"><div><h3>{productEditing ? 'Editar produto cadastrado' : 'Novo produto'}</h3><span>Esses dados ficarão disponíveis para toda a equipe.</span></div><button className="icon-button" onClick={() => openProduct()} title="Limpar formulário"><Plus size={18}/></button></div>
@@ -546,6 +553,7 @@ function Workspace({ user, onLogout }: Props) {
               <label>Apresentação<input maxLength={180} value={productForm.unit_label} placeholder="Ex.: CX C/ 25PC X 100UND" onChange={e => setProductForm(p => ({ ...p, unit_label: e.target.value }))}/></label>
               <div className="price-fields"><label>Preço DE<span className="input-prefix">R$</span><CurrencyInput value={productForm.price_from} onChange={v => setProductForm(p => ({ ...p, price_from: v }))} placeholder="99,90"/></label>
                 <label>Preço POR <span className="required">*</span><span className="input-prefix">R$</span><CurrencyInput value={productForm.price_to} onChange={v => setProductForm(p => ({ ...p, price_to: v ?? 0 }))} placeholder="78,75"/></label></div>
+              <label className="weight-toggle"><input type="checkbox" checked={productForm.is_weight_based} onChange={e => setProductForm(p => ({ ...p, is_weight_based: e.target.checked }))}/><span><strong>Preço por peso (KG)</strong><small>Marque para mostrar KG automaticamente no cartaz</small></span></label>
               <button className="btn btn-primary full" onClick={() => void saveProduct()} disabled={working || !!catalogError}><Save size={18}/>{productEditing ? 'Salvar alterações na biblioteca' : 'Cadastrar na biblioteca'}</button>
               {productEditing && <><button className="btn btn-outline full" onClick={() => addProduct(productEditing)}><Plus size={17}/> Adicionar à montagem</button>
                 {productEditing.owner_id === user.id && <button className="danger-link" onClick={() => void deleteProduct(productEditing)}><Trash2 size={16}/> Excluir cadastro</button>}</>}
@@ -573,15 +581,16 @@ function Workspace({ user, onLogout }: Props) {
           <label>Apresentação / unidade<input maxLength={180} value={quickProductForm.unit_label} placeholder="Ex.: CX C/ 25PC X 100UND" onChange={event => setQuickProductForm(prev => ({ ...prev, unit_label: event.target.value }))}/></label>
           <div className="price-fields"><label>Preço DE (opcional)<span className="input-prefix">R$</span><CurrencyInput value={quickProductForm.price_from} onChange={value => setQuickProductForm(prev => ({ ...prev, price_from: value }))} placeholder="99,90"/></label>
             <label>Preço POR <span className="required">*</span><span className="input-prefix">R$</span><CurrencyInput value={quickProductForm.price_to} onChange={value => setQuickProductForm(prev => ({ ...prev, price_to: value ?? 0 }))} placeholder="78,75"/></label></div>
+          <label className="weight-toggle"><input type="checkbox" checked={quickProductForm.is_weight_based} onChange={event => setQuickProductForm(prev => ({ ...prev, is_weight_based: event.target.checked }))}/><span><strong>Preço por peso (KG)</strong><small>Mostrar KG automaticamente ao montar o cartaz</small></span></label>
           <p className="quick-product-note"><ShieldCheck size={16}/> Ao salvar, o produto aparecerá na lista à esquerda e poderá ser usado em qualquer modelo.</p>
         </div>
         <footer><button type="button" className="btn btn-subtle" onClick={() => setQuickProductOpen(false)} disabled={working}>Cancelar</button><button type="submit" className="btn btn-primary" disabled={working || !!catalogError || quickProductForm.product_name.trim().length < 2 || !Number.isFinite(quickProductForm.price_to) || quickProductForm.price_to <= 0}><Save size={18}/>{working ? 'Salvando...' : 'Salvar produto'}</button></footer>
       </form>
     </div>}
     {batchOpen && <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setBatchOpen(false) }}><section className="modal batch-modal" role="dialog" aria-modal="true" aria-label="Importar produtos"><header><div><div className="eyebrow muted">BIBLIOTECA DE PRODUTOS</div><h2>Importar produtos em lote</h2><p>Os itens ficarão disponíveis em qualquer modelo, sem criar cartazes persistentes.</p></div><button className="icon-button" onClick={() => setBatchOpen(false)} aria-label="Fechar"><X size={20}/></button></header>
-      <div className="modal-content"><div className="batch-columns"><span>PRODUTO</span><span>PREÇO DE</span><span>PREÇO POR</span><span>UNIDADE</span></div>
-        <textarea rows={9} spellCheck={false} className="batch-input" value={batchText} onChange={e => { setBatchText(e.target.value); setBatchRows(null); setBatchFilename('') }} placeholder={'CRISTALCOPO COPO PS 150ML 100UN\t99,90\t78,75\tCX C/ 25PC X 100UND\nSACOLA NEWPLAST M\t39,90\t34,50\tFD C/ 1000 UN'}/>
-        <p className="batch-hint"><FileSpreadsheet size={15}/> Excel .xlsx: A Produto, B De, C Por, D Unidade. Aceita colagem do Excel ou CSV separado por ponto e vírgula. Até 200 itens por importação; registros repetidos não são duplicados.</p>
+      <div className="modal-content"><div className="batch-columns"><span>PRODUTO</span><span>PREÇO DE</span><span>PREÇO POR</span><span>UNIDADE</span><span>PESO (KG)</span></div>
+        <textarea rows={9} spellCheck={false} className="batch-input" value={batchText} onChange={e => { setBatchText(e.target.value); setBatchRows(null); setBatchFilename('') }} placeholder={'CRISTALCOPO COPO PS 150ML 100UN\t99,90\t78,75\tCX C/ 25PC X 100UND\tNÃO\nSOUZAPEL BOBINA ABC SACO PICOT\t20,90\t14,49\t40X60 | 20X30 | 25X35 | 30X40 | 35X50\tSIM'}/>
+        <p className="batch-hint"><FileSpreadsheet size={15}/> Excel .xlsx: A Produto, B De, C Por, D Unidade, E Peso (KG) opcional (SIM ou NÃO). Aceita colagem do Excel ou CSV separado por ponto e vírgula. Até 200 itens por importação; registros repetidos não são duplicados.</p>
         {batchFilename && <p className="batch-success"><CheckCircle2 size={16}/>{batchFilename} carregado · {batchRows?.length || 'revise as linhas'} produto(s).</p>}
         <div className="batch-file-actions"><a className="link-action" href={`${import.meta.env.BASE_URL}exemplo-cartazes.xlsx`} download="exemplo-cartazes.xlsx"><FileSpreadsheet size={16}/> Baixar Excel de exemplo</a>
           <button className="link-action" onClick={() => batchFileRef.current?.click()}><UploadCloud size={16}/> Escolher planilha</button>
@@ -592,7 +601,7 @@ function Workspace({ user, onLogout }: Props) {
           if (/\.xlsx$/i.test(selected.name)) {
             void importExcel(selected).then(rows => { const converted = rows
               setBatchRows(converted); setBatchFilename(selected.name)
-              setBatchText(converted.map(row => [row.product_name, row.price_from ?? '', row.price_to, row.unit_label].join('\t')).join('\n'))
+              setBatchText(converted.map(row => [row.product_name, row.price_from ?? '', row.price_to, row.unit_label, row.is_weight_based ? 'SIM' : 'NÃO'].join('\t')).join('\n'))
               notify(`${converted.length} produtos do Excel preparados.`)
             }).catch(error => notify(cleanError(error), true))
           } else if (/\.(csv|tsv|txt)$/i.test(selected.name)) void selected.text().then(text => { setBatchText(text.replace(/^\uFEFF/, '')); setBatchRows(null); setBatchFilename(selected.name) }).catch(error => notify(cleanError(error), true))
@@ -604,8 +613,8 @@ function Workspace({ user, onLogout }: Props) {
 
 function TutorialPage({ onBegin, onProducts, onTemplates }: { onBegin: () => void; onProducts: () => void; onTemplates: () => void }) {
   const steps = [
-    ['1', 'Cadastre os produtos', 'Na tela de montagem, clique em Adicionar produto abaixo da busca, preencha o popup e salve. Informe descrição, apresentação, preço DE (opcional) e preço POR. O cadastro será compartilhado e reutilizável.'],
-    ['2', 'Importe uma planilha Excel', 'Em Produtos ou na montagem, escolha Importar Excel. Use as colunas A Produto, B De, C Por e D Unidade. Confirme para adicionar somente os produtos ainda não cadastrados.'],
+    ['1', 'Cadastre os produtos', 'Na tela de montagem, clique em Adicionar produto abaixo da busca, preencha o popup e salve. Informe descrição, apresentação, preço DE (opcional), preço POR e marque Peso (KG) quando o valor for por quilo. O cadastro será compartilhado e reutilizável.'],
+    ['2', 'Importe uma planilha Excel', 'Em Produtos ou na montagem, escolha Importar Excel. Use A Produto, B De, C Por, D Unidade e, opcionalmente, E Peso (KG) com SIM ou NÃO. Confirme para adicionar somente os produtos ainda não cadastrados.'],
     ['3', 'Crie ou escolha um modelo', 'Em Modelos, envie uma arte PNG/JPG vertical. Marque a área de conteúdo e abra a aba Elementos para arrastar cada texto e preço, inclusive DE com R$. Clique em Salvar modelo.'],
     ['4', 'Monte a impressão', 'Entre em Montar cartazes, selecione o modelo e clique nos produtos da biblioteca. Eles entram na fila desta sessão, sem criar registros novos de cartazes no Supabase.'],
     ['5', 'Ajuste somente esta impressão', 'Clique em um cartaz da fila. Altere valores, descrição, fonte ou modelo no painel lateral. Esses ajustes não modificam o cadastro do produto.'],
@@ -649,10 +658,11 @@ function TemplateEditor({ template, imageUrl, fonts, working, onClose, onSave, o
   const [dimensions, setDimensions] = useState({ width: template?.image_width || 1447, height: template?.image_height || 2048 })
   const [tab, setTab] = useState<'area' | 'elements' | 'result'>('elements')
   const [simulateNoOldPrice, setSimulateNoOldPrice] = useState(false)
+  const [simulateWeight, setSimulateWeight] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   useEffect(() => () => { if (fileUrl) URL.revokeObjectURL(fileUrl) }, [fileUrl])
   const currentUrl = fileUrl || imageUrl
-  const sample = { ...EXAMPLE_POSTER, price_from: simulateNoOldPrice ? null : EXAMPLE_POSTER.price_from, template_id: template?.id || 'draft-template' }
+  const sample = { ...EXAMPLE_POSTER, price_from: simulateNoOldPrice ? null : EXAMPLE_POSTER.price_from, is_weight_based: simulateWeight, template_id: template?.id || 'draft-template' }
   const data: PosterTemplate = { ...EXAMPLE_TEMPLATE, ...template, id: template?.id || 'draft-template', name, zone, style, image_width: dimensions.width, image_height: dimensions.height }
   function onChoose(selected: File | null) {
     if (!selected) return
@@ -684,7 +694,7 @@ function TemplateEditor({ template, imageUrl, fonts, working, onClose, onSave, o
       <button className="btn btn-primary full" disabled={working || !name.trim()} onClick={() => void onSave({ name, zone, style, image_width: dimensions.width, image_height: dimensions.height }, file, template)}><Save size={18}/> Salvar alterações</button>
     </div></section>
     <section className="panel model-edit-stage"><div className="panel-title"><div><h3>{tab === 'area' ? 'Definir área geral' : tab === 'elements' ? 'Arrastar elementos livremente' : 'Resultado com preços'}</h3><span>{tab === 'area' ? 'Arraste a área e o canto inferior direito' : tab === 'elements' ? 'Arraste o texto ou o preço; redimensione pelo canto' : 'Prévia final com valores de exemplo'}</span></div><div className="mini-tabs"><button className={tab === 'area' ? 'on' : ''} onClick={() => setTab('area')}>Área</button><button className={tab === 'elements' ? 'on' : ''} onClick={() => { setSimulateNoOldPrice(false); setTab('elements') }}>Elementos</button><button className={tab === 'result' ? 'on' : ''} onClick={() => setTab('result')}>Prévia</button></div></div>
-      <div className="model-stage-content">{tab === 'area' ? <ZoneEditor imageURL={currentUrl} zone={zone} onChange={setZone}/> : tab === 'elements' ? <ElementsEditor template={data} poster={sample} imageURL={currentUrl} fontFamily={font?.family} onChange={(key: PosterElement, value: Zone) => setStyle(current => ({ ...current, elements: { ...defaultElementZones(zone), ...current.elements, [key]: value } }))}/> : <><label className="preview-no-de"><input type="checkbox" checked={simulateNoOldPrice} onChange={e => setSimulateNoOldPrice(e.target.checked)}/> Simular cartaz sem preço DE</label><PosterCanvas template={data} poster={sample} imageURL={currentUrl} fontFamily={font?.family}/></>}</div>
+      <div className="model-stage-content">{tab === 'area' ? <ZoneEditor imageURL={currentUrl} zone={zone} onChange={setZone}/> : tab === 'elements' ? <ElementsEditor template={data} poster={sample} imageURL={currentUrl} fontFamily={font?.family} onChange={(key: PosterElement, value: Zone) => setStyle(current => ({ ...current, elements: { ...defaultElementZones(zone), ...current.elements, [key]: value } }))}/> : <><div className="preview-sim-options"><label className="preview-no-de"><input type="checkbox" checked={simulateNoOldPrice} onChange={e => setSimulateNoOldPrice(e.target.checked)}/> Simular cartaz sem preço DE</label><label className="preview-no-de"><input type="checkbox" checked={simulateWeight} onChange={e => setSimulateWeight(e.target.checked)}/> Simular preço por KG</label></div><PosterCanvas template={data} poster={sample} imageURL={currentUrl} fontFamily={font?.family}/></>}</div>
       <div className="stage-note"><MoveUpRight size={17}/><span>Área: X {Math.round(zone.x * 100)}% • Y {Math.round(zone.y * 100)}% • Largura {Math.round(zone.w * 100)}% • Altura {Math.round(zone.h * 100)}%</span><button className="text-button" onClick={() => setStyle(s => ({ ...s, elements: undefined }))}>Restaurar posições</button><button className="text-button" onClick={() => { setZone({ ...INITIAL_ZONE }); setStyle(s => ({ ...s, elements: undefined })) }}>Restaurar área</button></div>
     </section></div>
   </>
